@@ -1,0 +1,11 @@
+Manifest-Version: 1.0
+Bundle-ManifestVersion: 2
+Bundle-Name: Plugged_webapp
+Bundle-SymbolicName: plugged_webapp
+Bundle-Version: 1.0.0.qualifier
+Bundle-Activator: plugged_webapp.Activator
+Import-Package: org.osgi.framework;version="1.3.0"
+Bundle-RequiredExecutionEnvironment: JavaSE-1.6
+Require-Bundle: org.intalio.osgi.jetty.server,
+ javax.servlet;bundle-version="2.5.0"
+

@@ -1,0 +1,6 @@
+<?xml version='1.0' encoding='utf-8'?>
+<component name='org.intalio.osgi.jetty.extender.Activator'>
+  <implementation class='org.intalio.osgi.jetty.boot.WebappActivator'/>
+  <reference name='log' interface='org.osgi.service.log.LogService' bind='setLog' unbind='unsetLog'/>
+  <!--reference name='http' interface='org.osgi.service.http.HttpService' bind='setHttp' unbind='unsetHttp'/-->
+</component>

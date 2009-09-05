@@ -1,0 +1,16 @@
+--- 
+org.intalio.osgi: []
+
+org.intalio.osgi:org.intalio.osgi.examplewebapp: 
+- osgi:org.eclipse.osgi:jar:3.5.0.v20090520
+org.intalio.osgi:org.intalio.osgi.jetty.server: 
+- osgi:javax.servlet.jsp:jar:2.0.0.v200806031607
+- osgi:javax.servlet:jar:2.5.0.v200806031605
+- osgi:org.apache.ant:jar:1.7.1.v20090120-1145
+- osgi:org.apache.commons.el:jar:1.0.0.v200806031608
+- osgi:org.apache.commons.logging:jar:1.0.4.v200904062259
+- osgi:org.apache.jasper:jar:5.5.17.v200903231320
+- osgi:org.eclipse.osgi.services:jar:3.2.0.v20090520-1800
+- osgi:org.eclipse.osgi:jar:3.5.0.v20090520
+- osgi:org.mortbay.jetty.server:jar:6.1.15.v200905151201
+- osgi:org.mortbay.jetty.util:jar:6.1.15.v200905182336

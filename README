@@ -1,0 +1,42 @@
+Goal: Prototype the support to develop web-applications that are contained inside an OSGi bundle.
+
+Architecture: as simple as possible. Bootstrap jetty inside OSGi.
+Support registering a web-application entirely contained inside an osgi-bundle.
+Support going from the bundle to the file-system without additional
+configuration parameters: Servlet.getRealPath(String) is supported. 
+
+Favored environment: eclipse-PDE-3.5. Tested on equinox. Should work on felix, nuxeo and knopplerfish.
+(Assuming it does not conflict with the HttpService.)
+
+How-to:
+--------
+Import the 2 plugins in your workspace
+Start the OSGi execution.
+Access the url http://localhost:8080/example and be in awe.
+
+Presentation
+--------------
+2 osgi bundles:
+- org.intalio.osgi.jetty.server is the engine.
+- org.intalio.osgi.webappexample is the example webapp.
+
+Jetty is started using the traditional jetty.xml file.
+jndi, datasources and other would need additonal dependencies so jetty plus would probably not work.
+
+The webapp use an ugly java API to register the bundle as a webapplication.
+
+Next steps:
+-------------
+We don't want to re-invent the wheel so we are most likely stopping here. This functionality is achieved at least by spring-dm although it is less pleasant to set it up to be able to develop webapps just like one develops an osgi bundle inside eclipse PDE.
+
+Next step would consists of coding preoper services and apply the extender pattern so that the webappexample does not depend on org.intalio.osgi.jetty.server and does not require glue code to register itself as a webapplication.
+If we choose wisely the Headers to apply the extender pattern it would be compatible with spring-dm.
+
+FAQ:
+----
+Does not OSGi support already webapps with the HttpService?
+No it does not: it supports registering servlets programatically is all it does.
+
+Does not pax or sping-dm webapp extender do the job already?
+Yes they do but they favor a maven approach: build and deploy.
+Eclipse-PDE supports running osgi bundles more directly.

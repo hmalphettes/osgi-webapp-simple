@@ -8,11 +8,25 @@ configuration parameters: Servlet.getRealPath(String) is supported.
 Favored environment: eclipse-PDE-3.5. Tested on equinox. Should work on felix, nuxeo and knopplerfish.
 (Assuming it does not conflict with the HttpService.)
 
+Status:
+-------
+Currently working on migrating to jetty-7.
+
 How-to:
 --------
-Import the 2 plugins in your workspace
+Download Jetty-distribution-7.0.0.RC5.tar.gz (http://repo2.maven.org/maven2/org/eclipse/jetty/jetty-distribution/7.0.0.RC5/jetty-distribution-7.0.0.RC5.tar.gz)
+Import all bundles located inside jetty-7.0.0.RC5/lib and inside jetty-7.0.0.RC5/lib/etc as Eclise-Plugins/Linked Content
+Import the extra plugins for javax.transaction and java.annotation (see https://bugs.eclipse.org/bugs/show_bug.cgi?id=289286)
+Fix the manifest of org.eclipse.jetty.continuation (see https://bugs.eclipse.org/bugs/show_bug.cgi?id=289285)
+Import the plugin org.intalio.osgi.jetty.server in your workspace
+Create a new Run Configuration for an OSGi app:
+   Deselect all the platform's bundles.
+   Select all the workspace bundles.
+   Click on "Add Required Bundles"
+   Make sure no dependnecies are missing with "Validate Dependencies"
+
 Start the OSGi execution.
-Access the url http://localhost:8080/example and be in awe.
+Currently we have classloaders issues and are looking for the best solution.
 
 Presentation
 --------------

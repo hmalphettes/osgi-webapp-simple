@@ -23,6 +23,7 @@ import org.eclipse.jetty.webapp.WebAppClassLoader;
 import org.eclipse.jetty.webapp.WebAppContext;
 import org.eclipse.jetty.webapp.WebXmlConfiguration;
 import org.eclipse.jetty.xml.XmlConfiguration;
+import org.osgi.framework.Bundle;
 import org.osgi.framework.BundleActivator;
 import org.osgi.framework.BundleContext;
 
@@ -51,7 +52,7 @@ public class JettyBootstrapActivator implements BundleActivator {
 		System.err.println("Activating" + this.getClass().getName());
 		
 		INSTANCE = this;
-		_installLocation = getBundleInstallLocation(context);
+		_installLocation = getBundleInstallLocation(context.getBundle());
 		
 		String jettyHome = System.getProperty("jetty.home");
 		if (jettyHome == null || jettyHome.length() == 0) {
@@ -61,17 +62,19 @@ public class JettyBootstrapActivator implements BundleActivator {
 		if (jettyLogs == null || jettyLogs.length() == 0) {
 			System.setProperty("jetty.logs", System.getProperty("jetty.home") + "/logs");
 		}
+		ClassLoader contextCl = Thread.currentThread().getContextClassLoader();
 		try {
 			_server = new Server();
 			XmlConfiguration config = new XmlConfiguration(new FileInputStream(
-					System.getProperty("jetty.home") + "/etc/jetty.xml")) {
-				
-			};
+					System.getProperty("jetty.home") + "/etc/jetty.xml"));
+			Thread.currentThread().setContextClassLoader(JettyBootstrapActivator.class.getClassLoader());
 			config.configure(_server);
 			_server.start();
 //					_server.join();
 		} catch (Throwable t) {
 			t.printStackTrace();
+		} finally {
+			Thread.currentThread().setContextClassLoader(contextCl);
 		}
 		
 	}
@@ -86,22 +89,24 @@ public class JettyBootstrapActivator implements BundleActivator {
 	}
 	
 	
-//Ugly hack to go from the bundle to its location in the filesystem
-//Not OSGi-like at all but we want to support servlet#getRealPath which does return a java.io.File.
+	//hack to locate the file-system directly from the bundle.
+	//support equinox, felix and nuxeo's osgi implementations.
+	//not tested on nuxeo and felix just yet.
+	//The url nuxeo and felix return is created directly from the File so it should work.
 	private static Field BUNDLE_ENTRY_FIELD = null;
 	private static Field FILE_FIELD = null;
-	public static File getBundleInstallLocation(BundleContext context) throws Exception {
+	public static File getBundleInstallLocation(Bundle bundle) throws Exception {
 		//String installedBundles = System.getProperty("osgi.bundles");
 		//grab the MANIFEST.MF's url
 		//and then do what it takes.
-		URL url = context.getBundle().getEntry("/META-INF/MANIFEST.MF");
-//		System.err.println(url.toString() + " " + url.toURI() + " " + url.getProtocol());
+		URL url = bundle.getEntry("/META-INF/MANIFEST.MF");
+//			System.err.println(url.toString() + " " + url.toURI() + " " + url.getProtocol());
 		if (url.getProtocol().equals("file")) {
 			//this is the case with Felix and maybe other OSGI frameworks
 			//should make sure it is not a jar.
 			return new File(url.toURI()).getParentFile().getParentFile();
 		} else if (url.getProtocol().equals("bundleentry")) {
-			//say hello to equinox who has its own protocole.
+			//say hello to equinox who has its own protocol.
 			//we use introspection like there is no tomorrow to get access to the File
 			URLConnection con = url.openConnection();
 			if (BUNDLE_ENTRY_FIELD == null) {
@@ -131,9 +136,9 @@ public class JettyBootstrapActivator implements BundleActivator {
 	 * OSGI classloader.
 	 * @throws Exception
 	 */
-	public void registerWebapplication(BundleContext context, String webappFolderPath,
+	public void registerWebapplication(Bundle bundle, String webappFolderPath,
 			String contextPath, Class<?> classInBundle) throws Exception {
-		File bundleInstall = getBundleInstallLocation(context);
+		File bundleInstall = getBundleInstallLocation(bundle);
 		File webapp = webappFolderPath != null && webappFolderPath.length() != 0
 			? new File(bundleInstall, webappFolderPath) : bundleInstall;
 		if (!webapp.exists()) {
@@ -175,3 +180,23 @@ public class JettyBootstrapActivator implements BundleActivator {
 	}
 
 }
+class TwinClassLoaders extends ClassLoader {
+	private ClassLoader _cl2;
+	public TwinClassLoaders(ClassLoader cl1, ClassLoader cl2) {
+		super(cl1);
+		_cl2 = cl2;
+	}
+	protected Class<?> findClass(String name) throws ClassNotFoundException {
+		try {
+			return super.findClass(name);
+		} catch (ClassNotFoundException cne) {
+			if (_cl2 != null) {
+				return _cl2.loadClass(name);
+			} else {
+				throw cne;
+			}
+		}
+	}
+
+}
+

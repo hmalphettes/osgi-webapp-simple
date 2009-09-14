@@ -17,7 +17,7 @@ import java.net.URL;
 import java.net.URLConnection;
 
 import org.eclipse.jetty.server.Server;
-import org.eclipse.jetty.server.handler.HandlerCollection;
+import org.eclipse.jetty.server.handler.ContextHandlerCollection;
 import org.eclipse.jetty.webapp.JettyWebXmlConfiguration;
 import org.eclipse.jetty.webapp.WebAppClassLoader;
 import org.eclipse.jetty.webapp.WebAppContext;
@@ -69,6 +69,15 @@ public class JettyBootstrapActivator implements BundleActivator {
 					System.getProperty("jetty.home") + "/etc/jetty.xml"));
 			Thread.currentThread().setContextClassLoader(JettyBootstrapActivator.class.getClassLoader());
 			config.configure(_server);
+			
+			//check that there is a handler able to support webapps with this config:
+			ContextHandlerCollection ctxtHandler = (ContextHandlerCollection)_server
+					.getChildHandlerByClass(ContextHandlerCollection.class);
+			if (ctxtHandler == null) {
+				System.err.println("Warning: could not find a ContextHandlerCollection:" +
+						" it won't be possible to register web-applications.");
+			}
+			
 			_server.start();
 //					_server.join();
 		} catch (Throwable t) {
@@ -145,7 +154,7 @@ public class JettyBootstrapActivator implements BundleActivator {
 			throw new IllegalArgumentException("Unable to locate " + contextPath
 					+ " inside ");
 		}
-		registerWebapplication(webapp, contextPath, classInBundle);
+		registerWebapplication(bundle, webapp, contextPath, classInBundle);
 	}
 
 	/**
@@ -155,7 +164,7 @@ public class JettyBootstrapActivator implements BundleActivator {
 	 * @param classInBundle
 	 * @throws Exception
 	 */
-	public void registerWebapplication(File webapp, String contextPath, Class<?> classInBundle) throws Exception {
+	public void registerWebapplication(Bundle contributor, File webapp, String contextPath, Class<?> classInBundle) throws Exception {
 		WebAppContext context = new WebAppContext(webapp.getAbsolutePath(), contextPath);
 		context.setDefaultsDescriptor(System.getProperty("jetty.home") + "/etc/webdefault.xml");
 		
@@ -165,11 +174,46 @@ public class JettyBootstrapActivator implements BundleActivator {
 		JettyWebXmlConfiguration jettyXml = new JettyWebXmlConfiguration();
 		jettyXml.configure(context);
 		
-		//ok now make sure the server knows this webapp:
-		((HandlerCollection)_server.getHandlers()[0]).addHandler(context);
+		//ok now register this webapp. we checked when we started jetty that there
+		//was at least one such handler for webapps.
+		ContextHandlerCollection ctxtHandler = (ContextHandlerCollection)_server
+				.getChildHandlerByClass(ContextHandlerCollection.class);
+		ctxtHandler.addHandler(context);
 		
-		WebAppClassLoader cl = new WebAppClassLoader(classInBundle.getClassLoader(), context);
-		context.setClassLoader(cl);
+        //[Hugues] if we want the webapp to be able to load classes inside osgi
+        //we must get a hold of the bundle's classloader.
+        //I have not found a way to do this directly from the bundle object unfortunately.
+        //As a workaround, we require the developer to declare the class name of
+        //an object that is defined inside the bundle.
+        //TODO: find a way to get the bundle's classloader directly from the org.osgi.framework.Bundle object (?)
+        String bundleClassName = (String) contributor
+        	.getHeaders().get("Webapp-InternalClassName");
+        if (bundleClassName == null) {
+        	bundleClassName = (String) contributor
+        		.getHeaders().get("Bundle-Activator");
+        }
+        if (bundleClassName == null) {
+        	//parse the web.xml and look for a class name there ?
+        }
+        if (bundleClassName != null) {
+//this solution does not insert all the jetty related classes in the webapp's classloader:
+//    		WebAppClassLoader cl = new WebAppClassLoader(classInBundle.getClassLoader(), context);
+//    		context.setClassLoader(cl);
+
+        	//Make all of the jetty's classes available to the webapplication classloader
+        	//also add the contributing bundle's classloader to give access to osgi to
+        	//the contributed webapp.
+            ClassLoader osgiCl = contributor.loadClass(bundleClassName).getClassLoader();
+		    ClassLoader composite = new TwinClassLoaders(
+		    		JettyBootstrapActivator.class.getClassLoader(), osgiCl);
+		    WebAppClassLoader wcl = new WebAppClassLoader(composite, context);
+		    context.setClassLoader(wcl);
+        } else {
+        	//Make all of the jetty's classes available to the webapplication classloader
+        	WebAppClassLoader wcl = new WebAppClassLoader(
+        			JettyBootstrapActivator.class.getClassLoader(), context);
+		    context.setClassLoader(wcl);
+        }
 		
 		context.start();
 		

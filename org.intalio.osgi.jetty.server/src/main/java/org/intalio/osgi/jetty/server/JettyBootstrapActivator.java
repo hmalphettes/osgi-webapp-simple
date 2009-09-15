@@ -29,7 +29,24 @@ import org.osgi.framework.BundleContext;
 
 /**
  * Experiment: bootstrap jetty's complete distrib from an OSGi bundle.
- * 
+ * Progress:
+ * <ol>
+ * <li> basic servlet [ok]</li>
+ * <li> basic jetty.xml [ok]</li>
+ * <li> basic jetty.xml and jetty-plus.xml [ok]</li>
+ * <li> basic jsp [ok with modifications]
+ *   <ul>
+ *     <li>Needed to modify the headers of jdt.core-3.1.1 so that its dependency on 
+ * eclipse.runtime, eclipse.resources and eclipse.text are optional.
+ * Also we should depend on the latest jdt.core from eclipse-3.5 not from eclipse-3.1.1
+ * although that will require actual changes to jasper as some internal APIs of
+ * jdt.core have changed.</li>
+ *     <li>Modifications to org.mortbay.jetty.jsp-2.1-glassfish:
+ * made all imports to ant, xalan and sun pacakges optional.</li>
+ *   </ul>
+ * </li>
+ * <li> jsp with tag-libs [untested]</li>
+ * </ul>
  * @author hmalphettes
  * @author Intalio Inc
  */
@@ -50,7 +67,7 @@ public class JettyBootstrapActivator implements BundleActivator {
 	 */
 	public void start(BundleContext context) throws Exception {
 		System.err.println("Activating" + this.getClass().getName());
-		
+				
 		INSTANCE = this;
 		_installLocation = getBundleInstallLocation(context.getBundle());
 		
@@ -67,6 +84,9 @@ public class JettyBootstrapActivator implements BundleActivator {
 			_server = new Server();
 			XmlConfiguration config = new XmlConfiguration(new FileInputStream(
 					System.getProperty("jetty.home") + "/etc/jetty.xml"));
+			
+			//passing this bundle's classloader as the context classlaoder
+			//makes sure there is access to all the jetty's bundles
 			Thread.currentThread().setContextClassLoader(JettyBootstrapActivator.class.getClassLoader());
 			config.configure(_server);
 			
@@ -164,58 +184,69 @@ public class JettyBootstrapActivator implements BundleActivator {
 	 * @param classInBundle
 	 * @throws Exception
 	 */
-	public void registerWebapplication(Bundle contributor, File webapp, String contextPath, Class<?> classInBundle) throws Exception {
-		WebAppContext context = new WebAppContext(webapp.getAbsolutePath(), contextPath);
-		context.setDefaultsDescriptor(System.getProperty("jetty.home") + "/etc/webdefault.xml");
+	public void registerWebapplication(Bundle contributor, File webapp,
+			String contextPath, Class<?> classInBundle) throws Exception {
 		
-		WebXmlConfiguration webXml = new WebXmlConfiguration();
-		webXml.configure(context);
-		
-		JettyWebXmlConfiguration jettyXml = new JettyWebXmlConfiguration();
-		jettyXml.configure(context);
-		
-		//ok now register this webapp. we checked when we started jetty that there
-		//was at least one such handler for webapps.
-		ContextHandlerCollection ctxtHandler = (ContextHandlerCollection)_server
-				.getChildHandlerByClass(ContextHandlerCollection.class);
-		ctxtHandler.addHandler(context);
-		
-        //[Hugues] if we want the webapp to be able to load classes inside osgi
-        //we must get a hold of the bundle's classloader.
-        //I have not found a way to do this directly from the bundle object unfortunately.
-        //As a workaround, we require the developer to declare the class name of
-        //an object that is defined inside the bundle.
-        //TODO: find a way to get the bundle's classloader directly from the org.osgi.framework.Bundle object (?)
-        String bundleClassName = (String) contributor
-        	.getHeaders().get("Webapp-InternalClassName");
-        if (bundleClassName == null) {
-        	bundleClassName = (String) contributor
-        		.getHeaders().get("Bundle-Activator");
-        }
-        if (bundleClassName == null) {
-        	//parse the web.xml and look for a class name there ?
-        }
-        if (bundleClassName != null) {
+		ClassLoader contextCl = Thread.currentThread().getContextClassLoader();
+		try {
+			//make sure we provide access to all the jetty bundles by going through this bundle.
+			Thread.currentThread().setContextClassLoader(JettyBootstrapActivator.class.getClassLoader());
+			
+			WebAppContext context = new WebAppContext(webapp.getAbsolutePath(), contextPath);
+			context.setDefaultsDescriptor(System.getProperty("jetty.home") + "/etc/webdefault.xml");
+			
+			WebXmlConfiguration webXml = new WebXmlConfiguration();
+			webXml.configure(context);
+			
+			JettyWebXmlConfiguration jettyXml = new JettyWebXmlConfiguration();
+			jettyXml.configure(context);
+			
+			//ok now register this webapp. we checked when we started jetty that there
+			//was at least one such handler for webapps.
+			ContextHandlerCollection ctxtHandler = (ContextHandlerCollection)_server
+					.getChildHandlerByClass(ContextHandlerCollection.class);
+			ctxtHandler.addHandler(context);
+			
+	        //[Hugues] if we want the webapp to be able to load classes inside osgi
+	        //we must get a hold of the bundle's classloader.
+	        //I have not found a way to do this directly from the bundle object unfortunately.
+	        //As a workaround, we require the developer to declare the class name of
+	        //an object that is defined inside the bundle.
+	        //TODO: find a way to get the bundle's classloader directly from the org.osgi.framework.Bundle object (?)
+	        String bundleClassName = (String) contributor
+	        	.getHeaders().get("Webapp-InternalClassName");
+	        if (bundleClassName == null) {
+	        	bundleClassName = (String) contributor
+	        		.getHeaders().get("Bundle-Activator");
+	        }
+	        if (bundleClassName == null) {
+	        	//parse the web.xml and look for a class name there ?
+	        }
+	        if (bundleClassName != null) {
 //this solution does not insert all the jetty related classes in the webapp's classloader:
 //    		WebAppClassLoader cl = new WebAppClassLoader(classInBundle.getClassLoader(), context);
 //    		context.setClassLoader(cl);
-
-        	//Make all of the jetty's classes available to the webapplication classloader
-        	//also add the contributing bundle's classloader to give access to osgi to
-        	//the contributed webapp.
-            ClassLoader osgiCl = contributor.loadClass(bundleClassName).getClassLoader();
-		    ClassLoader composite = new TwinClassLoaders(
-		    		JettyBootstrapActivator.class.getClassLoader(), osgiCl);
-		    WebAppClassLoader wcl = new WebAppClassLoader(composite, context);
-		    context.setClassLoader(wcl);
-        } else {
-        	//Make all of the jetty's classes available to the webapplication classloader
-        	WebAppClassLoader wcl = new WebAppClassLoader(
-        			JettyBootstrapActivator.class.getClassLoader(), context);
-		    context.setClassLoader(wcl);
-        }
+	
+	        	//Make all of the jetty's classes available to the webapplication classloader
+	        	//also add the contributing bundle's classloader to give access to osgi to
+	        	//the contributed webapp.
+	            ClassLoader osgiCl = contributor.loadClass(bundleClassName).getClassLoader();
+			    ClassLoader composite = new TwinClassLoaders(
+			    		JettyBootstrapActivator.class.getClassLoader(), osgiCl);
+			    WebAppClassLoader wcl = new WebAppClassLoader(composite, context);
+			    context.setClassLoader(wcl);
+	        } else {
+	        	//Make all of the jetty's classes available to the webapplication classloader
+	        	WebAppClassLoader wcl = new WebAppClassLoader(
+	        			JettyBootstrapActivator.class.getClassLoader(), context);
+			    context.setClassLoader(wcl);
+	        }
+			
+			context.start();
 		
-		context.start();
+		} finally {
+			Thread.currentThread().setContextClassLoader(contextCl);
+		}
 		
 	}
 	

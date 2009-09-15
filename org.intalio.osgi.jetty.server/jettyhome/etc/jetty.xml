@@ -30,7 +30,18 @@
       </New>
       -->
     </Set>
-
+<!-- Added from jetty-plus.xml -->
+  <!-- =========================================================== -->
+  <!-- Configurations for WebAppContexts                           -->
+  <!-- Sequence of configurations to enable Plus features.         -->
+  <!-- =========================================================== -->
+  <Array id="plusConfig" type="java.lang.String">
+    <Item>org.mortbay.jetty.webapp.WebInfConfiguration</Item>
+    <Item>org.mortbay.jetty.plus.webapp.EnvConfiguration</Item>
+    <Item>org.mortbay.jetty.plus.webapp.Configuration</Item>
+    <Item>org.mortbay.jetty.webapp.JettyWebXmlConfiguration</Item>
+    <Item>org.mortbay.jetty.webapp.TagLibConfiguration</Item>
+  </Array>
 
 
     <!-- =========================================================== -->

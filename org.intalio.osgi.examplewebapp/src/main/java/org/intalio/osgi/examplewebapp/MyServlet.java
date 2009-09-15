@@ -24,13 +24,11 @@ public class MyServlet extends HttpServlet {
 	@Override
 	public void init(ServletConfig config) throws ServletException {
 		super.init(config);
-		System.err.println("initing");
 	}
 
 	@Override
 	protected void service(HttpServletRequest req, HttpServletResponse resp)
 			throws ServletException, IOException {
-		System.err.println("aha");
 		resp.getWriter().write("aha a lovely servlet indeed");
 	}
 

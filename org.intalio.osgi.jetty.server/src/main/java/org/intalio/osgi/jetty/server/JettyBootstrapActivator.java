@@ -14,8 +14,11 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.lang.reflect.Field;
 import java.net.URL;
+import java.net.URLClassLoader;
 import java.net.URLConnection;
+import java.util.HashSet;
 
+import org.apache.jasper.compiler.TldLocationsCache;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.handler.ContextHandlerCollection;
 import org.eclipse.jetty.webapp.JettyWebXmlConfiguration;
@@ -26,6 +29,7 @@ import org.eclipse.jetty.xml.XmlConfiguration;
 import org.osgi.framework.Bundle;
 import org.osgi.framework.BundleActivator;
 import org.osgi.framework.BundleContext;
+import org.osgi.framework.FrameworkUtil;
 
 /**
  * Experiment: bootstrap jetty's complete distrib from an OSGi bundle.
@@ -67,7 +71,9 @@ public class JettyBootstrapActivator implements BundleActivator {
 	 */
 	public void start(BundleContext context) throws Exception {
 		System.err.println("Activating" + this.getClass().getName());
-				
+		
+		enableParsingCdotTldOutsideOfJar();
+		
 		INSTANCE = this;
 		_installLocation = getBundleInstallLocation(context.getBundle());
 		
@@ -231,7 +237,8 @@ public class JettyBootstrapActivator implements BundleActivator {
 	        	//also add the contributing bundle's classloader to give access to osgi to
 	        	//the contributed webapp.
 	            ClassLoader osgiCl = contributor.loadClass(bundleClassName).getClassLoader();
-			    ClassLoader composite = new TwinClassLoaders(
+	            ClassLoader composite = new URLTwinClassLoaders(
+	            		getBundlesWithTlds(),
 			    		JettyBootstrapActivator.class.getClassLoader(), osgiCl);
 			    WebAppClassLoader wcl = new WebAppClassLoader(composite, context);
 			    context.setClassLoader(wcl);
@@ -253,8 +260,55 @@ public class JettyBootstrapActivator implements BundleActivator {
 	public void unregister(String contextPath) {
 		//TODO
 	}
+	
+	/**
+	 * The jasper TldScanner expects a URLClassloader to parse a jar for the
+	 * /META-INF/*.tld it may contain.
+	 * We place the bundles that we know contain such tag-libraries.
+	 * Please note that it will work if and only if the bundle is a jar (!)
+	 * Currently we just hardcode the bundle that contains the jstl implemenation.
+	 * 
+	 * A workaround when the tld cannot be parsed with this method is to copy and paste
+	 * it inside the WEB-INF of the webapplication where it is used.
+	 * 
+	 * @return
+	 * @throws Exception
+	 */
+	private URL[] getBundlesWithTlds() throws Exception {
+		Bundle jasperBundler = FrameworkUtil.getBundle(TldLocationsCache.class);
+		File jasperLocation = getBundleInstallLocation(jasperBundler);
+		return new URL[] {jasperLocation.toURI().toURL()};
+	}
+	
+	/**
+	 * Jasper's TldLocationsCache is restricting the loading of c.tld
+	 * to jars. That really does not make it easy for us to develop with eclipse
+	 * PDE.... so here is to that till things are cleaner.
+	 */
+	private static void enableParsingCdotTldOutsideOfJar() {
+		try {
+			Field sys = TldLocationsCache.class.getDeclaredField("systemUris");
+			sys.setAccessible(true);
+			((HashSet<?>)sys.get(null)).clear();
+		} catch (SecurityException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		} catch (NoSuchFieldException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		} catch (IllegalArgumentException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		} catch (IllegalAccessException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+	}
 
 }
+/**
+ * Simple classloader that gives access to the 
+ */
 class TwinClassLoaders extends ClassLoader {
 	private ClassLoader _cl2;
 	public TwinClassLoaders(ClassLoader cl1, ClassLoader cl2) {
@@ -274,4 +328,26 @@ class TwinClassLoaders extends ClassLoader {
 	}
 
 }
+/**
+ * Support the automated resolution of the /META-INF/*.tld files embedded in bundles
+ * for TldLocationsCache.
+ */
+class URLTwinClassLoaders extends URLClassLoader {
+	private ClassLoader _cl2;
+	public URLTwinClassLoaders(URL[] urls, ClassLoader cl1, ClassLoader cl2) {
+		super(urls, cl1);
+		_cl2 = cl2;
+	}
+	protected Class<?> findClass(String name) throws ClassNotFoundException {
+		try {
+			return super.findClass(name);
+		} catch (ClassNotFoundException cne) {
+			if (_cl2 != null) {
+				return _cl2.loadClass(name);
+			} else {
+				throw cne;
+			}
+		}
+	}
 
+}

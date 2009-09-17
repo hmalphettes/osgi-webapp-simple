@@ -8,6 +8,9 @@ import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
+import org.eclipse.jetty.continuation.Continuation;
+import org.eclipse.jetty.continuation.ContinuationSupport;
+
 /**
  * Simplest servlet we could come up with.
  * 
@@ -29,7 +32,8 @@ public class MyServlet extends HttpServlet {
 	@Override
 	protected void service(HttpServletRequest req, HttpServletResponse resp)
 			throws ServletException, IOException {
-		resp.getWriter().write("aha a lovely servlet indeed");
+		Continuation cont = ContinuationSupport.getContinuation(req);
+		resp.getWriter().write("aha a lovely servlet indeed and continuation is available " + cont);
 	}
 
 }

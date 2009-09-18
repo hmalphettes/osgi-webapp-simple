@@ -10,10 +10,7 @@
 *******************************************************************************/
 package org.intalio.osgi.jetty.server.internal.jsp;
 
-import java.io.File;
-import java.io.FileInputStream;
 import java.io.InputStream;
-import java.net.URI;
 
 import javax.servlet.jsp.JspContext;
 
@@ -39,12 +36,12 @@ public class TldConfigurationHelper {
 	 * Unfortunately, the dtd file is not in the exact same classloader
 	 * as ParserUtils class and the dtds are packaged in 2 separate bundles.
 	 * OSGi does not look in the dependencies' classloader when a resource is searched.
-	 * 
+	 * <p>
 	 * The workaround consists of setting the entity resolver.
 	 * That is a patch added to the version of glassfish-jasper-jetty.
 	 * IT is also present in the latest version of glassfish jasper.
-	 * 
-	 * We fix this here with yet a bit more of introspection.
+	 * Could not use introspection to set new value on a static friendly field :(
+	 * </p>
 	 */
 	public static void fixupDtdResolution() {
 		try {
@@ -68,10 +65,7 @@ public class TldConfigurationHelper {
      */
 	static class MyFixedupEntityResolver implements EntityResolver {
 	    /**
-	     * List of the Public IDs that we cache, and their
-	     * associated location. This is used by 
-	     * an EntityResolver to return the location of the
-	     * cached copy of a DTD.
+	     * Same values than in ParserUtils...
 	     */
 	    static final String[] CACHED_DTD_PUBLIC_IDS = {
 		Constants.TAGLIB_DTD_PUBLIC_ID_11,
@@ -106,22 +100,23 @@ public class TldConfigurationHelper {
 	                String resourcePath = CACHED_DTD_RESOURCE_PATHS[i];
 	                // END PWC 6386258
 	                InputStream input = null;
-	                if (false /*ParserUtils.isDtdResourcePrefixFileUrl*/) {//we don't need this.
-	                    try {
-	                        File path = new File(new URI(resourcePath));
-	                        if (path.exists()) {
-	                            input = new FileInputStream(path);
-	                        }
-	                    } catch(Exception e) {
-	                        throw new SAXException(e);
-	                    }
-	                } else {
+//	                if (false /*ParserUtils.isDtdResourcePrefixFileUrl*/) {//we don't need this.
+//	                    try {
+//	                        File path = new File(new URI(resourcePath));
+//	                        if (path.exists()) {
+//	                            input = new FileInputStream(path);
+//	                        }
+//	                    } catch(Exception e) {
+//	                        throw new SAXException(e);
+//	                    }
+//	                } else {
 	        	        //instead of using the ParserUtil's classloader, we use a class
-	        	        //that is indeed next to the resource for sure.
+	        	        //that is indeed "__next__" to the resource for sure.
 	                    input = JspContext.class.getResourceAsStream(resourcePath);
-	                }
+//	                }
 	                if (input == null) {
-	                	//if that failed try again with the original code: although it is likely not changed.
+	                	//if that failed try again with the original code:
+	                	//although it is likely not changed.
 	                	input = this.getClass().getResourceAsStream(resourcePath);
 	                }
 	                if (input == null) {

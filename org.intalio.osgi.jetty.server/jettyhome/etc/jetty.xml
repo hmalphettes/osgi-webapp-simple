@@ -30,7 +30,8 @@
       </New>
       -->
     </Set>
-<!-- Added from jetty-plus.xml -->
+    
+<!-- Added from jetty-plus.xml but is this really necessary? -->
   <!-- =========================================================== -->
   <!-- Configurations for WebAppContexts                           -->
   <!-- Sequence of configurations to enable Plus features.         -->

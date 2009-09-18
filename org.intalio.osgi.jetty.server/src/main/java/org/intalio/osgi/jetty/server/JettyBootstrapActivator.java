@@ -1,5 +1,5 @@
 /******************************************************************************
-* Copyright (c) 2006, Intalio Inc.
+* Copyright (c) 2009, Intalio Inc.
 * All rights reserved. This program and the accompanying materials
 * are made available under the terms of the Eclipse Public License v1.0
 * which accompanies this distribution, and is available at
@@ -12,11 +12,8 @@ package org.intalio.osgi.jetty.server;
 
 import java.io.File;
 import java.io.FileInputStream;
-import java.lang.reflect.Field;
 import java.net.URL;
-import java.net.URLClassLoader;
-import java.net.URLConnection;
-import java.util.HashSet;
+import java.util.ArrayList;
 
 import org.apache.jasper.compiler.TldLocationsCache;
 import org.eclipse.jetty.server.Server;
@@ -26,6 +23,10 @@ import org.eclipse.jetty.webapp.WebAppClassLoader;
 import org.eclipse.jetty.webapp.WebAppContext;
 import org.eclipse.jetty.webapp.WebXmlConfiguration;
 import org.eclipse.jetty.xml.XmlConfiguration;
+import org.intalio.osgi.jetty.server.internal.jsp.TldConfigurationHelper;
+import org.intalio.osgi.jetty.server.internal.jsp.TldLocatableURLClassloader;
+import org.intalio.osgi.jetty.server.internal.jsp.TldLocatableURLClassloaderWithInsertedJettyClassloader;
+import org.intalio.osgi.jetty.server.utils.FileLocatorHelper;
 import org.osgi.framework.Bundle;
 import org.osgi.framework.BundleActivator;
 import org.osgi.framework.BundleContext;
@@ -71,11 +72,10 @@ public class JettyBootstrapActivator implements BundleActivator {
 	 */
 	public void start(BundleContext context) throws Exception {
 		System.err.println("Activating" + this.getClass().getName());
-		
-		enableParsingCdotTldOutsideOfJar();
+		TldConfigurationHelper.fixupDtdResolution();
 		
 		INSTANCE = this;
-		_installLocation = getBundleInstallLocation(context.getBundle());
+		_installLocation = FileLocatorHelper.getBundleInstallLocation(context.getBundle());
 		
 		String jettyHome = System.getProperty("jetty.home");
 		if (jettyHome == null || jettyHome.length() == 0) {
@@ -85,6 +85,8 @@ public class JettyBootstrapActivator implements BundleActivator {
 		if (jettyLogs == null || jettyLogs.length() == 0) {
 			System.setProperty("jetty.logs", System.getProperty("jetty.home") + "/logs");
 		}
+		
+		
 		ClassLoader contextCl = Thread.currentThread().getContextClassLoader();
 		try {
 			_server = new Server();
@@ -124,40 +126,6 @@ public class JettyBootstrapActivator implements BundleActivator {
 	}
 	
 	
-	//hack to locate the file-system directly from the bundle.
-	//support equinox, felix and nuxeo's osgi implementations.
-	//not tested on nuxeo and felix just yet.
-	//The url nuxeo and felix return is created directly from the File so it should work.
-	private static Field BUNDLE_ENTRY_FIELD = null;
-	private static Field FILE_FIELD = null;
-	public static File getBundleInstallLocation(Bundle bundle) throws Exception {
-		//String installedBundles = System.getProperty("osgi.bundles");
-		//grab the MANIFEST.MF's url
-		//and then do what it takes.
-		URL url = bundle.getEntry("/META-INF/MANIFEST.MF");
-//			System.err.println(url.toString() + " " + url.toURI() + " " + url.getProtocol());
-		if (url.getProtocol().equals("file")) {
-			//this is the case with Felix and maybe other OSGI frameworks
-			//should make sure it is not a jar.
-			return new File(url.toURI()).getParentFile().getParentFile();
-		} else if (url.getProtocol().equals("bundleentry")) {
-			//say hello to equinox who has its own protocol.
-			//we use introspection like there is no tomorrow to get access to the File
-			URLConnection con = url.openConnection();
-			if (BUNDLE_ENTRY_FIELD == null) {
-				BUNDLE_ENTRY_FIELD = con.getClass().getDeclaredField("bundleEntry");
-				BUNDLE_ENTRY_FIELD.setAccessible(true);
-			}
-			Object bundleEntry = BUNDLE_ENTRY_FIELD.get(con);
-			if (FILE_FIELD == null) {
-				FILE_FIELD = bundleEntry.getClass().getDeclaredField("file");
-				FILE_FIELD.setAccessible(true);
-			}
-			File f = (File)FILE_FIELD.get(bundleEntry);
-			return f.getParentFile().getParentFile();
-		}
-		return null;
-	}
 
 	/**
 	 * Deploy a new web application on the jetty server.
@@ -173,7 +141,7 @@ public class JettyBootstrapActivator implements BundleActivator {
 	 */
 	public void registerWebapplication(Bundle bundle, String webappFolderPath,
 			String contextPath, Class<?> classInBundle) throws Exception {
-		File bundleInstall = getBundleInstallLocation(bundle);
+		File bundleInstall = FileLocatorHelper.getBundleInstallLocation(bundle);
 		File webapp = webappFolderPath != null && webappFolderPath.length() != 0
 			? new File(bundleInstall, webappFolderPath) : bundleInstall;
 		if (!webapp.exists()) {
@@ -237,15 +205,20 @@ public class JettyBootstrapActivator implements BundleActivator {
 	        	//also add the contributing bundle's classloader to give access to osgi to
 	        	//the contributed webapp.
 	            ClassLoader osgiCl = contributor.loadClass(bundleClassName).getClassLoader();
-	            ClassLoader composite = new URLTwinClassLoaders(
-	            		getBundlesWithTlds(),
-			    		JettyBootstrapActivator.class.getClassLoader(), osgiCl);
+	            ClassLoader composite = //new TwinClassLoaders(
+	            	new TldLocatableURLClassloaderWithInsertedJettyClassloader(
+			    		JettyBootstrapActivator.class.getClassLoader(), osgiCl,
+			    		getBundlesWithTlds());
 			    WebAppClassLoader wcl = new WebAppClassLoader(composite, context);
+			    //addJarsWithTlds(wcl);
 			    context.setClassLoader(wcl);
 	        } else {
 	        	//Make all of the jetty's classes available to the webapplication classloader
 	        	WebAppClassLoader wcl = new WebAppClassLoader(
-	        			JettyBootstrapActivator.class.getClassLoader(), context);
+	        			new TldLocatableURLClassloader(
+	    			    		JettyBootstrapActivator.class.getClassLoader(),
+	    			    		getBundlesWithTlds()), context);
+	        	//addJarsWithTlds(wcl);
 			    context.setClassLoader(wcl);
 	        }
 			
@@ -276,78 +249,26 @@ public class JettyBootstrapActivator implements BundleActivator {
 	 */
 	private URL[] getBundlesWithTlds() throws Exception {
 		Bundle jasperBundler = FrameworkUtil.getBundle(TldLocationsCache.class);
-		File jasperLocation = getBundleInstallLocation(jasperBundler);
-		return new URL[] {jasperLocation.toURI().toURL()};
+		File jasperLocation = FileLocatorHelper.getBundleInstallLocation(jasperBundler);
+		if (jasperLocation.isDirectory()) {
+			//try to find the jar files inside this folder
+			ArrayList<URL> urls = new ArrayList<URL>();
+			for (File f : jasperLocation.listFiles()) {
+				if (f.getName().endsWith(".jar") && f.isFile()) {
+					urls.add(f.toURI().toURL());
+				} else if (f.isDirectory() && f.getName().equals("lib")) {
+					for (File f2 : jasperLocation.listFiles()) {
+						if (f2.getName().endsWith(".jar") && f2.isFile()) {
+							urls.add(f2.toURI().toURL());
+						}
+					}
+				}
+			}
+			return urls.toArray(new URL[urls.size()]);
+		} else {
+			return new URL[] {jasperLocation.toURI().toURL()};
+		}
 	}
 	
-	/**
-	 * Jasper's TldLocationsCache is restricting the loading of c.tld
-	 * to jars. That really does not make it easy for us to develop with eclipse
-	 * PDE.... so here is to that till things are cleaner.
-	 */
-	private static void enableParsingCdotTldOutsideOfJar() {
-		try {
-			Field sys = TldLocationsCache.class.getDeclaredField("systemUris");
-			sys.setAccessible(true);
-			((HashSet<?>)sys.get(null)).clear();
-		} catch (SecurityException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (NoSuchFieldException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (IllegalArgumentException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (IllegalAccessException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		}
-	}
-
-}
-/**
- * Simple classloader that gives access to the 
- */
-class TwinClassLoaders extends ClassLoader {
-	private ClassLoader _cl2;
-	public TwinClassLoaders(ClassLoader cl1, ClassLoader cl2) {
-		super(cl1);
-		_cl2 = cl2;
-	}
-	protected Class<?> findClass(String name) throws ClassNotFoundException {
-		try {
-			return super.findClass(name);
-		} catch (ClassNotFoundException cne) {
-			if (_cl2 != null) {
-				return _cl2.loadClass(name);
-			} else {
-				throw cne;
-			}
-		}
-	}
-
-}
-/**
- * Support the automated resolution of the /META-INF/*.tld files embedded in bundles
- * for TldLocationsCache.
- */
-class URLTwinClassLoaders extends URLClassLoader {
-	private ClassLoader _cl2;
-	public URLTwinClassLoaders(URL[] urls, ClassLoader cl1, ClassLoader cl2) {
-		super(urls, cl1);
-		_cl2 = cl2;
-	}
-	protected Class<?> findClass(String name) throws ClassNotFoundException {
-		try {
-			return super.findClass(name);
-		} catch (ClassNotFoundException cne) {
-			if (_cl2 != null) {
-				return _cl2.loadClass(name);
-			} else {
-				throw cne;
-			}
-		}
-	}
 
 }

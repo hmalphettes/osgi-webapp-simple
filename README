@@ -1,16 +1,22 @@
+Project HIGHTIDE on OSGi
+-------------------------
 Goal: Prototype the support to develop web-applications that are contained inside an OSGi bundle.
+Target: all of the jetty-hightide example applications.
 
 Architecture: as simple as possible. Bootstrap jetty inside OSGi.
-Support registering a web-application entirely contained inside an osgi-bundle.
-Support going from the bundle to the file-system without additional
-configuration parameters: Servlet.getRealPath(String) is supported. 
+Support registering a web-application entirely contained inside an osgi-bundle either directly as a web-app either through jetty context files.
+Support going from the bundle to the file-system without additional configuration parameters: Servlet.getRealPath(String) is supported. 
 
 Favored environment: eclipse-PDE-3.5. Tested on equinox. Should work on felix, nuxeo and knopplerfish.
 (Assuming it does not conflict with the HttpService.)
 
 Status:
 -------
-Currently working on migrating to jetty-7.
+Works on jetty7.
+Basic jsp, jsp with jstl tested. Some bugs and enhancements reported for that. 
+Basic jndi also seem to work.
+
+Currently in progress: setup atomikos and derby with the test-jndi webapp.
 
 How-to:
 --------
@@ -30,9 +36,11 @@ Currently we have classloaders issues and are looking for the best solution.
 
 Presentation
 --------------
-2 osgi bundles:
+4 osgi bundles:
 - org.intalio.osgi.jetty.server is the engine.
 - org.intalio.osgi.webappexample is the example webapp.
+- org.intalio.osgi.webcontextexample is the same example webapp except that it is configured via a context file.
+- org.eclipse.jetty.hightide.testjndi is the test-jndi application packaged with hightide. and re-packaged as a bundle. (in progress, missing atomikos and derby)
 
 Jetty is started using the traditional jetty.xml file.
 jndi, datasources and other would need additonal dependencies so jetty plus would probably not work.
@@ -43,7 +51,7 @@ Next steps:
 -------------
 We don't want to re-invent the wheel so we are most likely stopping here. This functionality is achieved at least by spring-dm although it is less pleasant to set it up to be able to develop webapps just like one develops an osgi bundle inside eclipse PDE.
 
-Next step would consists of coding preoper services and apply the extender pattern so that the webappexample does not depend on org.intalio.osgi.jetty.server and does not require glue code to register itself as a webapplication.
+Next step would consists of coding proper osgi-services and apply the extender pattern so that the examples don't need to depend on org.intalio.osgi.jetty.server and does not require glue code to register itself as a webapplication.
 If we choose wisely the Headers to apply the extender pattern it would be compatible with spring-dm.
 
 FAQ:

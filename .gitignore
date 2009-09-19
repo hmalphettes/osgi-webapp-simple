@@ -1,2 +1,4 @@
 */target/*
 org.intalio.osgi.jetty.server/jettyhome/logs/*.log
+org.intalio.osgi.jetty.server/jettyhome/lib/*.jar
+org.intalio.osgi.jetty.server/jettyhome/lib/etc/*.jar

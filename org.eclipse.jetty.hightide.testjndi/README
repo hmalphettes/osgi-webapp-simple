@@ -1,5 +1,11 @@
 Port the test-jndi webapp of jetty-hightide into a self-contained OSGi bundle for the hightide-on-OSGi experiment.
-When the context file is looked-up, we also mirror its location into ${jetty.contexts}
+When the context file is looked-up, we also mirror its location into ${jetty.contexts.home}
 to use an overriding configuration outside of the bundle itself.
 
 In other words: when the context is inside the bundle it is for development purpose.
+
+The only difference between the original context file and the one in this port
+is the location of the webapp as set in the 'war':
+ <Set name="war"><SystemProperty name="jetty.home" default="."/>/webapps/test-jndi</Set>
+     becomes:
+ <Set name="war"><Property name="this.bundle.install"/>/web</Set>

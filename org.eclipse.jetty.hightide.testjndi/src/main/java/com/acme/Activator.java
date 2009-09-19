@@ -13,8 +13,8 @@ public class Activator implements BundleActivator {
 	public void start(BundleContext context) throws Exception {
 		 System.err.println("starting a test-jndi application bundle");
 		 try {
-			 JettyBootstrapActivator.getInstance().registerWebapplication(
-					 context.getBundle(), "web", "/test-jndi", JNDITest.class);
+			 JettyBootstrapActivator.getInstance().registerContext(
+					 context.getBundle(), "/contexts/test-jndi.xml", JNDITest.class);
 		 } catch (Throwable t) {
 		 t.printStackTrace();
 		 }

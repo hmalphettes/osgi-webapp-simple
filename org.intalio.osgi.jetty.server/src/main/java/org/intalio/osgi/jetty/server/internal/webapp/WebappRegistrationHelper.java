@@ -108,7 +108,11 @@ public class WebappRegistrationHelper {
 		ClassLoader contextCl = Thread.currentThread().getContextClassLoader();
 		try {
 			//make sure we provide access to all the jetty bundles by going through this bundle.
-			Thread.currentThread().setContextClassLoader(JettyBootstrapActivator.class.getClassLoader());
+			TldLocatableURLClassloader composite =
+				createContextClassLoader(contributor, classInBundle);
+			//configure with access to all jetty classes and also all the classes
+			//that the contributor gives access to.
+			Thread.currentThread().setContextClassLoader(composite);
 			
 			WebAppContext context = new WebAppContext(webapp.getAbsolutePath(), contextPath);
 			
@@ -124,7 +128,7 @@ public class WebappRegistrationHelper {
 			//was at least one such handler for webapps.
 			_ctxtHandler.addHandler(context);
 			
-			configureContextClassLoader(context, contributor, classInBundle);
+			configureContextClassLoader(context, composite);
 			
 			context.start();
 		
@@ -155,7 +159,11 @@ public class WebappRegistrationHelper {
 		ClassLoader contextCl = Thread.currentThread().getContextClassLoader();
 		try {
 			//make sure we provide access to all the jetty bundles by going through this bundle.
-			Thread.currentThread().setContextClassLoader(JettyBootstrapActivator.class.getClassLoader());
+			TldLocatableURLClassloader composite =
+				createContextClassLoader(contributor, classInBundle);
+			//configure with access to all jetty classes and also all the classes
+			//that the contributor gives access to.
+			Thread.currentThread().setContextClassLoader(composite);
 			ContextHandler context = createContextHandler(contributor, contextFile);
 	        //[H]extra work for the path to the file:
 	        if (context instanceof WebAppContext) {
@@ -167,7 +175,7 @@ public class WebappRegistrationHelper {
 			//was at least one such handler for webapps.
 			_ctxtHandler.addHandler(context);
 			
-			configureContextClassLoader(context, contributor, classInBundle);
+			configureContextClassLoader(context, composite);
 			
 			context.start();
 		} finally {
@@ -231,6 +239,16 @@ public class WebappRegistrationHelper {
 	 * and we throw IllegalStateExceptions.
 	 */
 	public void init() {
+		
+        //[Hugues] if no jndi is setup let's do it:
+		if (System.getProperty("java.naming.factory.initial") == null) {
+			System.setProperty("java.naming.factory.initial", "org.eclipse.jetty.jndi.InitialContextFactory");
+		}
+		if (System.getProperty("java.naming.factory.url.pkgs") == null) {
+			System.setProperty("java.naming.factory.url.pkgs", "org.eclipse.jetty.jndi");
+		}
+
+		
 		_ctxtHandler = (ContextHandlerCollection)_server
 			.getChildHandlerByClass(ContextHandlerCollection.class);
 		if (_ctxtHandler == null) {
@@ -364,6 +382,20 @@ public class WebappRegistrationHelper {
 	 * @throws Exception
 	 */
 	protected void configureContextClassLoader(ContextHandler context,
+			TldLocatableURLClassloader composite) throws Exception {
+		if (context instanceof WebAppContext) {
+		    WebAppClassLoader wcl =
+		    	new WebAppClassLoader(composite, (WebAppContext) context);
+		    //addJarsWithTlds(wcl);
+		    context.setClassLoader(wcl);
+        } else {
+        	context.setClassLoader(composite);
+        }
+
+	}
+	
+	
+	protected TldLocatableURLClassloader createContextClassLoader(
 			Bundle contributor, Class<?> classInBundle) throws Exception {
         String bundleClassName = (String) contributor
 	    	.getHeaders().get("Webapp-InternalClassName");
@@ -383,30 +415,17 @@ public class WebappRegistrationHelper {
 	    	//also add the contributing bundle's classloader to give access to osgi to
 	    	//the contributed webapp.
 	        ClassLoader osgiCl = contributor.loadClass(bundleClassName).getClassLoader();
-	        ClassLoader composite = //new TwinClassLoaders(
+	        TldLocatableURLClassloader composite =
 	        	new TldLocatableURLClassloaderWithInsertedJettyClassloader(
 		    		JettyBootstrapActivator.class.getClassLoader(), osgiCl,
 		    		getJarsWithTlds());
-	        if (context instanceof WebAppContext) {
-			    WebAppClassLoader wcl =
-			    	new WebAppClassLoader(composite, (WebAppContext) context);
-			    //addJarsWithTlds(wcl);
-			    context.setClassLoader(wcl);
-	        } else {
-	        	context.setClassLoader(composite);
-	        }
+	        return composite;
 	    } else {
 	    	//Make all of the jetty's classes available to the webapplication classloader
 	    	TldLocatableURLClassloader composite = new TldLocatableURLClassloader(
 		    		JettyBootstrapActivator.class.getClassLoader(),
 		    		getJarsWithTlds());
-	    	if (context instanceof WebAppContext) {
-	    		WebAppClassLoader wcl = new WebAppClassLoader(
-	    			composite, (WebAppContext) context);
-	    		context.setClassLoader(wcl);
-	    	} else {
-	    		context.setClassLoader(composite);
-	    	}
+	    	return composite;
 		    
 	    }
 

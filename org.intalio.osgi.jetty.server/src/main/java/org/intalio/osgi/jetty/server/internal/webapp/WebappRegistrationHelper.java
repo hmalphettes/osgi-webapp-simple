@@ -17,7 +17,9 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.Field;
+import java.net.MalformedURLException;
 import java.net.URL;
+import java.net.URLClassLoader;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -65,6 +67,11 @@ public class WebappRegistrationHelper {
 	private ContextDeployer _ctxtDeployer;
 	private WebAppDeployer _webappDeployer;
 	private ContextHandlerCollection _ctxtHandler;
+	
+	/** this class loader lods the jars inside {$jetty.home}/lib/etc
+	 * it is meant as a migration path and for jars that are not OSGi
+	 * ready. */
+	private URLClassLoader _libEtcClassLoader;
 	
 	public WebappRegistrationHelper(Server server) {
 		_server = server;
@@ -240,7 +247,9 @@ public class WebappRegistrationHelper {
 	 */
 	public void init() {
 		
-        //[Hugues] if no jndi is setup let's do it:
+        //[Hugues] if no jndi is setup let's do it.
+		//we could also get the bundle for jetty-jndi and open the corresponding properties file
+		//instead of hardcoding the values: but they are unlikely to change.
 		if (System.getProperty("java.naming.factory.initial") == null) {
 			System.setProperty("java.naming.factory.initial", "org.eclipse.jetty.jndi.InitialContextFactory");
 		}
@@ -276,6 +285,16 @@ public class WebappRegistrationHelper {
 		} else {
 			_webappDeployer = (WebAppDeployer)wDeployers.get(0);
 		}
+		
+		File jettyHome = new File(System.getProperty("jetty.home"));
+		try {
+			_libEtcClassLoader = LibEtcClassLoaderHelper
+				.createLibEtcClassLoaderHelper(jettyHome, _server,
+					JettyBootstrapActivator.class.getClassLoader());
+		} catch (MalformedURLException e) {
+			e.printStackTrace();
+		}
+		
 	}
 
 	/**
@@ -338,6 +357,12 @@ public class WebappRegistrationHelper {
 	        //insert the bundle's location as a property.
 	        setThisBundleHomeProperty(bundle, properties);
 	        xmlConfiguration.setProperties(properties);
+	        
+	        //bug in equinox? if jetty plus is an optionally required-bundle, then we can't load the class! 
+	        //JettyBootstrapActivator.class.getClassLoader().loadClass("org.eclipse.jetty.plus.jndi.EnvEntry");
+	        //FrameworkUtil.getBundle(JettyBootstrapActivator.class).loadClass("org.eclipse.jetty.plus.jndi.EnvEntry");
+	        //in fact the pde can't find it at compilation time and shows a warning "Unsatisfied version constraint: ..."
+	        //System.err.println(EnvEntry.class);
 	        ContextHandler context=(ContextHandler)xmlConfiguration.configure();
 	        context.setAttributes(new AttributesMap(_contextAttributes));
 	        return context;
@@ -417,14 +442,12 @@ public class WebappRegistrationHelper {
 	        ClassLoader osgiCl = contributor.loadClass(bundleClassName).getClassLoader();
 	        TldLocatableURLClassloader composite =
 	        	new TldLocatableURLClassloaderWithInsertedJettyClassloader(
-		    		JettyBootstrapActivator.class.getClassLoader(), osgiCl,
-		    		getJarsWithTlds());
+	        			_libEtcClassLoader, osgiCl, getJarsWithTlds());
 	        return composite;
 	    } else {
 	    	//Make all of the jetty's classes available to the webapplication classloader
 	    	TldLocatableURLClassloader composite = new TldLocatableURLClassloader(
-		    		JettyBootstrapActivator.class.getClassLoader(),
-		    		getJarsWithTlds());
+	    			_libEtcClassLoader, getJarsWithTlds());
 	    	return composite;
 		    
 	    }

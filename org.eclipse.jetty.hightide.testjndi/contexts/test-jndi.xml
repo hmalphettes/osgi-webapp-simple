@@ -21,7 +21,14 @@
   </Set>
 
   <Set name="contextPath">/test-jndi</Set>
-  <Set name="war"><SystemProperty name="jetty.home" default="."/>/webapps/test-jndi</Set>
+  
+<!-- Replace the traditional deployment by the deployment in the self-contained bundle:
+        ${jetty.home}/webapps/test-jndi
+     becomes:
+        ${this.bundle.instal}/web  -->
+  <!--Set name="war"><SystemProperty name="jetty.home" default="."/>/webapps/test-jndi</Set-->
+  <Set name="war"><Property name="this.bundle.install"/>/web</Set>
+  
   <Set name="extractWAR">false</Set>
   <Set name="copyWebDir">false</Set>
   <Set name="configurationDiscovered">true</Set>

@@ -19,7 +19,8 @@ import java.util.ArrayList;
 import org.osgi.framework.Bundle;
 
 /**
- * From bundle to its location on the filesystem.
+ * From a bundle to its location on the filesystem.
+ * Assumes the bundle is not a jar.
  * 
  * @author hmalphettes
  */

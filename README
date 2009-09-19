@@ -1,28 +1,33 @@
 Project HIGHTIDE on OSGi
 -------------------------
 Goal: Prototype the support to develop web-applications that are contained inside an OSGi bundle.
-Target: all of the jetty-hightide example applications.
+Target: all of the jetty-hightide example applications. Maybe more according to feedback.
 
-Architecture: as simple as possible. Bootstrap jetty inside OSGi.
+Architecture: as simple as possible: Bootstrap hightide inside OSGi from a single bundle. 
+
 Support registering a web-application entirely contained inside an osgi-bundle either directly as a web-app either through jetty context files.
 Support going from the bundle to the file-system without additional configuration parameters: Servlet.getRealPath(String) is supported. 
+Support jars inside ${jetty.home}/lib/etc (for legacy setups)
 
 Favored environment: eclipse-PDE-3.5. Tested on equinox. Should work on felix, nuxeo and knopplerfish.
 (Assuming it does not conflict with the HttpService.)
 
 Status:
 -------
-Works on jetty7.
-Basic jsp, jsp with jstl tested. Some bugs and enhancements reported for that. 
-Basic jndi also seem to work.
+Migrated to jetty7.
+Jsp and jstl tested. Some bugs and enhancements reported for that. 
+Jndi, jndi-with-data-source and transaction-manager also working.
 
-Currently in progress: setup atomikos and derby with the test-jndi webapp.
+Currently in progress:
+- extender pattern to remove the glue code.
+- outside of eclipse-PDE: production distribution
 
 How-to:
 --------
 Download Jetty-distribution-7.0.0.RC5.tar.gz (http://repo2.maven.org/maven2/org/eclipse/jetty/jetty-distribution/7.0.0.RC5/jetty-distribution-7.0.0.RC5.tar.gz)
 Import all bundles located inside jetty-7.0.0.RC5/lib and inside jetty-7.0.0.RC5/lib/etc as Eclise-Plugins/Linked Content
 Import the extra plugins for javax.transaction and java.annotation (see https://bugs.eclipse.org/bugs/show_bug.cgi?id=289286)
+
 Fix the manifest of org.eclipse.jetty.continuation (see https://bugs.eclipse.org/bugs/show_bug.cgi?id=289285)
 Import the plugin org.intalio.osgi.jetty.server in your workspace
 Create a new Run Configuration for an OSGi app:
@@ -31,8 +36,24 @@ Create a new Run Configuration for an OSGi app:
    Click on "Add Required Bundles"
    Make sure no dependnecies are missing with "Validate Dependencies"
 
-Start the OSGi execution.
-Currently we have classloaders issues and are looking for the best solution.
+      JSP-jasper setup (will be simpler in future releases of jetty hopefully)
+      ----------------
+Import as Eclise-Plugins/Linked Content the jsp plugins inside jetty-7.0.0.RC5/lib/jsp except the org.eclipse.jdt.core and the org.mortbay.jetty.jsp-2.1-glassfish
+Download ecj-3.5.jar: http://download.eclipse.org/eclipse/downloads/drops/R-3.5-200906111540/#JDTCORE
+Download the patched jsp-glassfish-impl: http://github.com/hmalphettes/jetty-jsp-tweaked-for-osgi/tree/tags/jetty-jsp-9.1.1.B60.25.p2/jsp-2.1-glassfish-9.1.1.B60.25.p2-osgi-patched.jar
+Import jsp-glassfish as __ Eclise-Plugins/Binary __ (not linked content...)
+Import org.eclipse.jdt.core.compiler.batch (ecj-3.5.jar) as Eclise-Plugins/Linked Content
+
+      Configure the OSGi execution from PDE.
+      --------------------------------------
+Menu "Run.../Configurations..."
+Make a new OSGi configuration.
+Unselect all the bundles in the platform.
+Select all the bundles in the workspace.
+Click on "Add Required Bundles"
+   Make sure that only org.eclipse.osgi and org.objectweb.asm bundles in the Platform are selected.
+   If not unselect all bundles in the platform and select those 2 manually.
+Click on "Validate Dependencies"
 
 Presentation
 --------------
@@ -40,19 +61,29 @@ Presentation
 - org.intalio.osgi.jetty.server is the engine.
 - org.intalio.osgi.webappexample is the example webapp.
 - org.intalio.osgi.webcontextexample is the same example webapp except that it is configured via a context file.
-- org.eclipse.jetty.hightide.testjndi is the test-jndi application packaged with hightide. and re-packaged as a bundle. (in progress, missing atomikos and derby)
+the context file is by default self-contained inside the bundle.
+In production, it will be looked up first into the folder ${jetty.contexts.home}/bundle.sympbolic.name/relativePathToContextFile
+- org.eclipse.jetty.hightide.testjndi is the test-jndi application packaged with hightide and re-packaged as a bundle.
+
+    org.eclipse.jetty.hightide.testjndi setup
+    -----------------------------------------
+Download the atomikos and derby dependencies as defined in this pom:
+    http://repo1.maven.org/maven2/org/mortbay/jetty/test-jndi-webapp/7.0.0.RC5/test-jndi-webapp-7.0.0.RC5.pom
+Put them inside ${jetty.home}/lib/etc)
+
 
 Jetty is started using the traditional jetty.xml file.
 jndi, datasources and other would need additonal dependencies so jetty plus would probably not work.
 
-The webapp use an ugly java API to register the bundle as a webapplication.
+The webapp use an ugly java API to register the bundle as a webapplication. replacing it with the extender pattern.
 
 Next steps:
 -------------
-We don't want to re-invent the wheel so we are most likely stopping here. This functionality is achieved at least by spring-dm although it is less pleasant to set it up to be able to develop webapps just like one develops an osgi bundle inside eclipse PDE.
-
-Next step would consists of coding proper osgi-services and apply the extender pattern so that the examples don't need to depend on org.intalio.osgi.jetty.server and does not require glue code to register itself as a webapplication.
-If we choose wisely the Headers to apply the extender pattern it would be compatible with spring-dm.
+- Remove the glue code that registers the bundle as a webapp or a jetty-app: use the extender pattern.
+- Prepare a typical production distribution.
+- Prepare a typical maven or buildr build.
+- Document
+- Push to the community: would be nice if the eclispe team would adopt this.
 
 FAQ:
 ----
@@ -61,4 +92,9 @@ No it does not: it supports registering servlets programatically is all it does.
 
 Does not pax or sping-dm webapp extender do the job already?
 Yes they do but they favor a maven approach: build and deploy.
-Eclipse-PDE supports running osgi bundles more directly.
+They are also targetting support for webapps. We are targetting full hightide support which includes:
+   jetty's server configuration files,
+   jetty's context files,
+   jetty-plus: jetty's jdni, transaction manager, jaas setup etc.
+Development: direct Eclipse-PDE supports running osgi bundles. All the settings and configuration files are self-contained.
+Production: in production, setup the jetty.home and the jetty.contexts.home folder to a folder outside of the plugins so that the settings can be manipulated more safely.

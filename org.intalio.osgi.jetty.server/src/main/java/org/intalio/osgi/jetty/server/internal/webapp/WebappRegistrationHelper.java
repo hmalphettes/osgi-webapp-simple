@@ -19,7 +19,6 @@ import java.io.InputStream;
 import java.lang.reflect.Field;
 import java.net.MalformedURLException;
 import java.net.URL;
-import java.net.URLClassLoader;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -68,10 +67,10 @@ public class WebappRegistrationHelper {
 	private WebAppDeployer _webappDeployer;
 	private ContextHandlerCollection _ctxtHandler;
 	
-	/** this class loader lods the jars inside {$jetty.home}/lib/etc
+	/** this class loader loads the jars inside {$jetty.home}/lib/etc
 	 * it is meant as a migration path and for jars that are not OSGi
 	 * ready. */
-	private URLClassLoader _libEtcClassLoader;
+	private ClassLoader _libEtcClassLoader;
 	
 	public WebappRegistrationHelper(Server server) {
 		_server = server;

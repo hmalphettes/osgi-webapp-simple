@@ -66,7 +66,7 @@ public class LibEtcClassLoaderHelper {
 	 * usuall is the JettyBootStrapper.
 	 * @throws MalformedURLException 
 	 */
-	public static URLClassLoader createLibEtcClassLoaderHelper(File jettyHome, Server server,
+	public static ClassLoader createLibEtcClassLoaderHelper(File jettyHome, Server server,
 			ClassLoader parentClassLoader)
 	throws MalformedURLException {
 		File libEtc = new File(jettyHome, "lib/etc");
@@ -80,6 +80,9 @@ public class LibEtcClassLoaderHelper {
 				}
 				urls.add(url);
 			}
+		}
+		if (urls.isEmpty()) {
+			return parentClassLoader;
 		}
 		return new URLClassLoader(urls.toArray(new URL[urls.size()]),
 				parentClassLoader);

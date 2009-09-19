@@ -91,6 +91,8 @@ public class JettyBootstrapActivator implements BundleActivator {
 			Thread.currentThread().setContextClassLoader(JettyBootstrapActivator.class.getClassLoader());
 			config.configure(_server);
 			
+			_webappRegistrationHelper.init();
+			
 			//check that there is a handler able to support webapps with this config:
 			ContextHandlerCollection ctxtHandler = (ContextHandlerCollection)_server
 					.getChildHandlerByClass(ContextHandlerCollection.class);
@@ -148,6 +150,31 @@ public class JettyBootstrapActivator implements BundleActivator {
 			String contextPath, Class<?> classInBundle) throws Exception {
 		_webappRegistrationHelper.registerWebapplication(contributor, webapp, contextPath, classInBundle);
 	}
+	
+	/**
+	 * 
+	 * @param contributor The bundle that registers a new context
+	 * @param contextRelativePath The path to the file insie the bundle that defines the context.
+	 * @param classInBundle
+	 * @throws Exception
+	 */
+	public void registerContext(Bundle contributor, String contextRelativePath,
+			Class<?> classInBundle) throws Exception {
+		File contextFile = FileLocatorHelper.getFileInBundle(contributor, contextRelativePath);
+		this.registerContext(contributor, contextFile, classInBundle);
+	}
+	/**
+	 * 
+	 * @param contributor
+	 * @param contextFile The context file.
+	 * @param classInBundle
+	 * @throws Exception
+	 */
+	public void registerContext(Bundle contributor, File contextFile,
+			Class<?> classInBundle) throws Exception {
+		_webappRegistrationHelper.registerContext(contributor, contextFile, classInBundle);
+	}
+	
 	
 	public void unregister(String contextPath) {
 		_webappRegistrationHelper.unregister(contextPath);

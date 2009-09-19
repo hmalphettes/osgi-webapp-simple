@@ -20,6 +20,7 @@ import java.lang.reflect.Field;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 
 import org.apache.jasper.compiler.TldLocationsCache;
 import org.eclipse.jetty.deploy.ConfigurationManager;
@@ -29,6 +30,7 @@ import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.handler.ContextHandler;
 import org.eclipse.jetty.server.handler.ContextHandlerCollection;
 import org.eclipse.jetty.util.AttributesMap;
+import org.eclipse.jetty.util.resource.Resource;
 import org.eclipse.jetty.webapp.JettyWebXmlConfiguration;
 import org.eclipse.jetty.webapp.WebAppClassLoader;
 import org.eclipse.jetty.webapp.WebAppContext;
@@ -43,10 +45,14 @@ import org.osgi.framework.FrameworkUtil;
 import org.xml.sax.SAXException;
 
 /**
+ * Bridges the traditional web-application deployers: {@link WebAppDeployer} and {@link ContextDeployer}
+ * with the OSGi lifecycle where applications are managed as OSGi-bundles.
+ * <p>
  * Helper methods to register a bundle that is a web-application or a context.
- * It is deployed as if the server was using its WebAppDeployer or ContextDeployer.
+ * It is deployed as if the server was using its WebAppDeployer or ContextDeployer
+ * as configured in its etc/jetty.xml file.
  * Well as close as possible to that.
- * 
+ * </p>
  * Limitations:
  * <ul>
  * <li>all bundles that contain a webapp are assumed unzipped.</li>
@@ -58,10 +64,10 @@ public class WebappRegistrationHelper {
 	private Server _server;
 	private ContextDeployer _ctxtDeployer;
 	private WebAppDeployer _webappDeployer;
+	private ContextHandlerCollection _ctxtHandler;
 	
 	public WebappRegistrationHelper(Server server) {
 		_server = server;
-		initDeployers();
 	}
 
 	/**
@@ -113,54 +119,12 @@ public class WebappRegistrationHelper {
 			jettyXml.configure(context);
 			
 			configureWebAppContext(context);
-
 			
 			//ok now register this webapp. we checked when we started jetty that there
 			//was at least one such handler for webapps.
-			ContextHandlerCollection ctxtHandler = (ContextHandlerCollection)_server
-					.getChildHandlerByClass(ContextHandlerCollection.class);
-			ctxtHandler.addHandler(context);
+			_ctxtHandler.addHandler(context);
 			
-	        //[Hugues] if we want the webapp to be able to load classes inside osgi
-	        //we must get a hold of the bundle's classloader.
-	        //I have not found a way to do this directly from the bundle object unfortunately.
-	        //As a workaround, we require the developer to declare the class name of
-	        //an object that is defined inside the bundle.
-	        //TODO: find a way to get the bundle's classloader directly from the org.osgi.framework.Bundle object (?)
-	        String bundleClassName = (String) contributor
-	        	.getHeaders().get("Webapp-InternalClassName");
-	        if (bundleClassName == null) {
-	        	bundleClassName = (String) contributor
-	        		.getHeaders().get("Bundle-Activator");
-	        }
-	        if (bundleClassName == null) {
-	        	//parse the web.xml and look for a class name there ?
-	        }
-	        if (bundleClassName != null) {
-//this solution does not insert all the jetty related classes in the webapp's classloader:
-//    		WebAppClassLoader cl = new WebAppClassLoader(classInBundle.getClassLoader(), context);
-//    		context.setClassLoader(cl);
-	
-	        	//Make all of the jetty's classes available to the webapplication classloader
-	        	//also add the contributing bundle's classloader to give access to osgi to
-	        	//the contributed webapp.
-	            ClassLoader osgiCl = contributor.loadClass(bundleClassName).getClassLoader();
-	            ClassLoader composite = //new TwinClassLoaders(
-	            	new TldLocatableURLClassloaderWithInsertedJettyClassloader(
-			    		JettyBootstrapActivator.class.getClassLoader(), osgiCl,
-			    		getJarsWithTlds());
-			    WebAppClassLoader wcl = new WebAppClassLoader(composite, context);
-			    //addJarsWithTlds(wcl);
-			    context.setClassLoader(wcl);
-	        } else {
-	        	//Make all of the jetty's classes available to the webapplication classloader
-	        	WebAppClassLoader wcl = new WebAppClassLoader(
-	        			new TldLocatableURLClassloader(
-	    			    		JettyBootstrapActivator.class.getClassLoader(),
-	    			    		getJarsWithTlds()), context);
-	        	//addJarsWithTlds(wcl);
-			    context.setClassLoader(wcl);
-	        }
+			configureContextClassLoader(context, contributor, classInBundle);
 			
 			context.start();
 		
@@ -186,10 +150,31 @@ public class WebappRegistrationHelper {
 	 * @param classInBundle
 	 * @throws Exception
 	 */
-	public void registerContext(Bundle contributor, File contextFile,
+	public synchronized void registerContext(Bundle contributor, File contextFile,
 			Class<?> classInBundle) throws Exception {
-		
-	}	
+		ClassLoader contextCl = Thread.currentThread().getContextClassLoader();
+		try {
+			//make sure we provide access to all the jetty bundles by going through this bundle.
+			Thread.currentThread().setContextClassLoader(JettyBootstrapActivator.class.getClassLoader());
+			ContextHandler context = createContextHandler(contributor, contextFile);
+	        //[H]extra work for the path to the file:
+	        if (context instanceof WebAppContext) {
+	        	WebAppContext wah = (WebAppContext)context;
+	        	Resource.newResource(wah.getWar());
+	        }
+	
+	        //ok now register this webapp. we checked when we started jetty that there
+			//was at least one such handler for webapps.
+			_ctxtHandler.addHandler(context);
+			
+			configureContextClassLoader(context, contributor, classInBundle);
+			
+			context.start();
+		} finally {
+			Thread.currentThread().setContextClassLoader(contextCl);
+		}
+
+	}
 	
 
 	/**
@@ -238,46 +223,49 @@ public class WebappRegistrationHelper {
 	}
 	
 	/**
+	 * Must be called after the server is configured.
+	 * 
 	 * Locate the actual instance of the ContextDeployer and WebAppDeployer
 	 *  that was created when configuring the server through jetty.xml.
 	 * If there is no such thing it won't be possible to deploy webapps from a context
 	 * and we throw IllegalStateExceptions.
 	 */
-	private void initDeployers() {
-		_ctxtDeployer = (ContextDeployer)_server.getBeans(ContextDeployer.class);
-		_webappDeployer = (WebAppDeployer)_server.getBeans(WebAppDeployer.class);
-		if (_ctxtDeployer == null) {
-			System.err.println("No ContextDeployer was configured" +
-					" with the server. Using a default one is not supported at" +
-					" this point. " + " Please reveiw the jetty.xml file used.");
+	public void init() {
+		_ctxtHandler = (ContextHandlerCollection)_server
+			.getChildHandlerByClass(ContextHandlerCollection.class);
+		if (_ctxtHandler == null) {
+			throw new IllegalStateException(
+					"ERROR: No ContextHandlerCollection was configured" +
+					" with the server to add applications to." +
+					"Using a default one is not supported at" +
+					" this point. " + " Please review the jetty.xml file used.");
 		}
-		if (_webappDeployer == null) {
-			System.err.println("No WebappDeployer was configured" +
+		List<ContextDeployer> ctxtDeployers = _server.getBeans(ContextDeployer.class);
+		
+		if (ctxtDeployers == null || ctxtDeployers.isEmpty()) {
+			System.err.println("Warn: No ContextDeployer was configured" +
 					" with the server. Using a default one is not supported at" +
-					" this point. " + " Please reveiw the jetty.xml file used.");
+					" this point. " + " Please review the jetty.xml file used.");
+		} else {
+			_ctxtDeployer = ctxtDeployers.get(0);
+		}
+		List<WebAppDeployer> wDeployers = _server.getBeans(WebAppDeployer.class);
+		
+		if (wDeployers == null || wDeployers.isEmpty()) {
+			System.err.println("Warn: No WebappDeployer was configured" +
+					" with the server. Using a default one is not supported at" +
+					" this point. " + " Please review the jetty.xml file used.");
+		} else {
+			_webappDeployer = (WebAppDeployer)wDeployers.get(0);
 		}
 	}
 
 	/**
-	 * 
-	 * @return
+	 * Applies the properties of WebAppDeployer as defined in jetty.xml.
+	 * @see {WebAppDeployer#scan} around the comment <code>// configure it</code>
 	 */
 	protected void configureWebAppContext(WebAppContext wah) {
-		/*
-        // configure it
-        wah.setContextPath(context);
-        if (_configurationClasses!=null)
-            wah.setConfigurationClasses(_configurationClasses);
-        if (_defaultsDescriptor!=null)
-            wah.setDefaultsDescriptor(_defaultsDescriptor);
-        wah.setExtractWAR(_extract);
-        wah.setWar(app.toString());
-        wah.setParentLoaderPriority(_parentLoaderPriority);
-        
-        //set up any contextAttributes
-        wah.setAttributes(new AttributesMap(_contextAttributes));
-		*/
-        // configure it
+		// configure it
         //wah.setContextPath(context);
 		String[] _configurationClasses = _webappDeployer.getConfigurationClasses();
 		String _defaultsDescriptor = _webappDeployer.getDefaultsDescriptor();
@@ -288,8 +276,8 @@ public class WebappRegistrationHelper {
             wah.setConfigurationClasses(_configurationClasses);
         if (_defaultsDescriptor!=null)
             wah.setDefaultsDescriptor(_defaultsDescriptor);
-        //wah.setExtractWAR(_extract);
-        //wah.setWar(app.toString());
+        //wah.setExtractWAR(_extract);//[H]should we force to extract ?
+        //wah.setWar(app.toString());//[H]should we force to extract ?
         wah.setParentLoaderPriority(_parentLoaderPriority);
         
         //set up any contextAttributes
@@ -302,7 +290,8 @@ public class WebappRegistrationHelper {
 	 * @param contextFile
 	 * @return
 	 */
-	protected ContextHandler createContextHandler(File contextFile) {
+	@SuppressWarnings("unchecked")
+	protected ContextHandler createContextHandler(Bundle bundle, File contextFile) {
 		
 		/*
 		 * Do something identical to what the ContextDeployer would have done:
@@ -317,7 +306,7 @@ public class WebappRegistrationHelper {
 	        context.setAttributes(new AttributesMap(_contextAttributes));
 
 		 */
-        ConfigurationManager _configMgr = getContextDeployerConfigurationManager();
+		ConfigurationManager _configMgr = getContextDeployerConfigurationManager();
         AttributesMap _contextAttributes = getContextDeployerContextAttributes();
 		InputStream in = null;
 		try {
@@ -328,7 +317,8 @@ public class WebappRegistrationHelper {
 	        if (_configMgr!=null) {
 	            properties.putAll(_configMgr.getProperties());
 	        }
-	           
+	        //insert the bundle's location as a property.
+	        setThisBundleHomeProperty(bundle, properties);
 	        xmlConfiguration.setProperties(properties);
 	        ContextHandler context=(ContextHandler)xmlConfiguration.configure();
 	        context.setAttributes(new AttributesMap(_contextAttributes));
@@ -350,11 +340,92 @@ public class WebappRegistrationHelper {
 		return null;
 	}
 	
+	/**
+	 * Configure a classloader onto the context.
+	 * If the context is a WebAppContext, build a WebAppClassLoader
+	 * that has access to all the jetty classes thanks to the classloader of 
+	 * the JettyBootStrapper bundle and also has access to the classloader of
+	 * the bundle that defines this context.
+	 * <p>
+	 * If the context is not a WebAppContext, same but with a simpler URLClassLoader.
+	 * Note that the URLClassLoader is pretty much fake:
+	 * it delegate all actual classloading to the parent classloaders.
+	 * </p>
+	 * <p>
+	 * The URL[] returned by the URLClassLoader create contained specifically 
+	 * the jars that some j2ee tools expect and look into. For example the jars
+	 * that contain tld files for jasper's jstl support.
+	 * </p>
+	 * @param context
+	 * @param contributor
+	 * @param webapp
+	 * @param contextPath
+	 * @param classInBundle
+	 * @throws Exception
+	 */
+	protected void configureContextClassLoader(ContextHandler context,
+			Bundle contributor, Class<?> classInBundle) throws Exception {
+        String bundleClassName = (String) contributor
+	    	.getHeaders().get("Webapp-InternalClassName");
+	    if (bundleClassName == null) {
+	    	bundleClassName = (String) contributor
+	    		.getHeaders().get("Bundle-Activator");
+	    }
+	    if (bundleClassName == null) {
+	    	//parse the web.xml and look for a class name there ?
+	    }
+	    if (bundleClassName != null) {
+	//this solution does not insert all the jetty related classes in the webapp's classloader:
+	//	WebAppClassLoader cl = new WebAppClassLoader(classInBundle.getClassLoader(), context);
+	//	context.setClassLoader(cl);
 	
-	protected void configureContextClassLoader(ContextHandler context) {
-		
+	    	//Make all of the jetty's classes available to the webapplication classloader
+	    	//also add the contributing bundle's classloader to give access to osgi to
+	    	//the contributed webapp.
+	        ClassLoader osgiCl = contributor.loadClass(bundleClassName).getClassLoader();
+	        ClassLoader composite = //new TwinClassLoaders(
+	        	new TldLocatableURLClassloaderWithInsertedJettyClassloader(
+		    		JettyBootstrapActivator.class.getClassLoader(), osgiCl,
+		    		getJarsWithTlds());
+	        if (context instanceof WebAppContext) {
+			    WebAppClassLoader wcl =
+			    	new WebAppClassLoader(composite, (WebAppContext) context);
+			    //addJarsWithTlds(wcl);
+			    context.setClassLoader(wcl);
+	        } else {
+	        	context.setClassLoader(composite);
+	        }
+	    } else {
+	    	//Make all of the jetty's classes available to the webapplication classloader
+	    	TldLocatableURLClassloader composite = new TldLocatableURLClassloader(
+		    		JettyBootstrapActivator.class.getClassLoader(),
+		    		getJarsWithTlds());
+	    	if (context instanceof WebAppContext) {
+	    		WebAppClassLoader wcl = new WebAppClassLoader(
+	    			composite, (WebAppContext) context);
+	    		context.setClassLoader(wcl);
+	    	} else {
+	    		context.setClassLoader(composite);
+	    	}
+		    
+	    }
+
 	}
 	
+	/**
+	 * Set the property &quot;this.bundle.install&quot; to point to the location of the bundle.
+	 * Useful when <SystemProperty name="this.bundle.home"/> is used.
+	 */
+	private void setThisBundleHomeProperty(Bundle bundle, HashMap<String,Object> properties) {
+		try {
+			File location = FileLocatorHelper.getBundleInstallLocation(bundle);
+			properties.put("this.bundle.install", location.getCanonicalPath());
+		} catch (Throwable t) {
+			System.err.println("Unable to set 'this.bundle.install' " +
+					" for the bundle " + bundle.getSymbolicName());
+			t.printStackTrace();
+		}
+	}
 	
 	
 	//some private suff in ContextDeployer that we need to

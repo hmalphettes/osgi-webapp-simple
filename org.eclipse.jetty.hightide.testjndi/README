@@ -1,0 +1,5 @@
+Port the test-jndi webapp of jetty-hightide into a self-contained OSGi bundle for the hightide-on-OSGi experiment.
+When the context file is looked-up, we also mirror its location into ${jetty.contexts}
+to use an overriding configuration outside of the bundle itself.
+
+In other words: when the context is inside the bundle it is for development purpose.

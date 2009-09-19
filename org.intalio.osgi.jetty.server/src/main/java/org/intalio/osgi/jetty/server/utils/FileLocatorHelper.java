@@ -73,6 +73,30 @@ public class FileLocatorHelper {
 	}
 	
 	/**
+	 * Locate a file inside a bundle.
+	 * @param bundle
+	 * @param path
+	 * @return
+	 * @throws Exception
+	 */
+	public static File getFileInBundle(Bundle bundle, String path) throws Exception {
+		if (path != null && path.length() > 0 && path.charAt(0) == '/') {
+			path = path.substring(1);
+		}
+		File bundleInstall = FileLocatorHelper.getBundleInstallLocation(bundle);
+		File webapp = path != null && path.length() != 0
+			? new File(bundleInstall, path) : bundleInstall;
+		if (!webapp.exists()) {
+			throw new IllegalArgumentException("Unable to locate " + path
+					+ " inside " + bundle.getSymbolicName()
+					+ " (" + (bundleInstall != null
+							? bundleInstall.getAbsolutePath()
+							: " no_bundle_location ") + ")");
+		}
+		return webapp;
+	}
+	
+	/**
 	 * If the bundle is a jar, returns the jar.
 	 * If the bundle is a folder, look inside it and search for jars that it returns.
 	 * 

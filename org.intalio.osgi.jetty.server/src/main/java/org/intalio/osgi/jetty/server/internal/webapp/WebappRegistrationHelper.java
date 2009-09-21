@@ -316,11 +316,11 @@ class WebappRegistrationHelper {
 			//that the contributor gives access to.
 			Thread.currentThread().setContextClassLoader(composite);
 			ContextHandler context = createContextHandler(contributor, contextFile);
-	        //[H]extra work for the path to the file:
-	        if (context instanceof WebAppContext) {
-	        	WebAppContext wah = (WebAppContext)context;
-	        	Resource.newResource(wah.getWar());
-	        }
+//	        //[H]extra work for the path to the file:
+//	        if (context instanceof WebAppContext) {
+//	        	WebAppContext wah = (WebAppContext)context;
+//	        	Resource.newResource(wah.getWar());
+//	        }
 	
 	        //ok now register this webapp. we checked when we started jetty that there
 			//was at least one such handler for webapps.
@@ -507,16 +507,7 @@ class WebappRegistrationHelper {
 	
 	protected TldLocatableURLClassloader createContextClassLoader(
 			Bundle contributor, Class<?> classInBundle) throws Exception {
-        String bundleClassName = (String) contributor
-	    	.getHeaders().get("Webapp-InternalClassName");
-	    if (bundleClassName == null) {
-	    	bundleClassName = (String) contributor
-	    		.getHeaders().get("Bundle-Activator");
-	    }
-	    if (bundleClassName == null) {
-	    	//parse the web.xml and look for a class name there ?
-	    }
-	    if (bundleClassName != null) {
+	    if (classInBundle != null) {
 	//this solution does not insert all the jetty related classes in the webapp's classloader:
 	//	WebAppClassLoader cl = new WebAppClassLoader(classInBundle.getClassLoader(), context);
 	//	context.setClassLoader(cl);
@@ -524,7 +515,7 @@ class WebappRegistrationHelper {
 	    	//Make all of the jetty's classes available to the webapplication classloader
 	    	//also add the contributing bundle's classloader to give access to osgi to
 	    	//the contributed webapp.
-	        ClassLoader osgiCl = contributor.loadClass(bundleClassName).getClassLoader();
+	        ClassLoader osgiCl = classInBundle.getClassLoader();
 	        TldLocatableURLClassloader composite =
 	        	new TldLocatableURLClassloaderWithInsertedJettyClassloader(
 	        			_libEtcClassLoader, osgiCl, getJarsWithTlds());

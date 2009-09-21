@@ -4,17 +4,17 @@ Bundle-Name: Jetty bootstrap
 Bundle-SymbolicName: org.intalio.osgi.jetty.server;singleton:=true
 Bundle-Version: 1.0.0.qualifier
 Bundle-Activator: org.intalio.osgi.jetty.server.JettyBootstrapActivator
-Import-Package: javax.naming,
+Import-Package: javax.mail,
+ javax.mail.event;resolution:=optional,
+ javax.mail.internet;resolution:=optional,
+ javax.mail.search;resolution:=optional,
+ javax.mail.util;resolution:=optional,
+ javax.naming,
  javax.naming.directory;resolution:=optional,
  javax.security.auth,
  javax.security.auth.callback;resolution:=optional,
  javax.security.auth.login;resolution:=optional,
  javax.security.auth.spi;resolution:=optional,
- javax.mail,
- javax.mail.event;resolution:=optional,
- javax.mail.internet;resolution:=optional,
- javax.mail.search;resolution:=optional,
- javax.mail.util;resolution:=optional,
  javax.servlet,
  javax.servlet.http,
  javax.transaction,
@@ -42,5 +42,6 @@ Require-Bundle: org.eclipse.jetty.ajp;bundle-version="[7.0,8)";resolution:=optio
  org.mortbay.jetty.jsp-2.1;bundle-version="[7.0,8)";resolution:=optional,
  org.mortbay.jetty.jsp-2.1-glassfish;bundle-version="9.1.1";resolution:=optional,
  org.mortbay.jetty.jsp-api-2.1-glassfish;bundle-version="2.1.0";resolution:=optional
-Export-Package: org.intalio.osgi.jetty.server
+Export-Package: org.intalio.osgi.jetty.server,
+ org.intalio.osgi.jetty.server.utils
 Bundle-ActivationPolicy: lazy

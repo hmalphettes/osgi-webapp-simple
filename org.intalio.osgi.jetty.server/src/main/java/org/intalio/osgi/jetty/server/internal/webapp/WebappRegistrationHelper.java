@@ -38,16 +38,23 @@ import org.eclipse.jetty.webapp.WebAppContext;
 import org.eclipse.jetty.webapp.WebXmlConfiguration;
 import org.eclipse.jetty.xml.XmlConfiguration;
 import org.intalio.osgi.jetty.server.JettyBootstrapActivator;
+import org.intalio.osgi.jetty.server.internal.jsp.TldConfigurationHelper;
 import org.intalio.osgi.jetty.server.internal.jsp.TldLocatableURLClassloader;
 import org.intalio.osgi.jetty.server.internal.jsp.TldLocatableURLClassloaderWithInsertedJettyClassloader;
 import org.intalio.osgi.jetty.server.utils.FileLocatorHelper;
 import org.osgi.framework.Bundle;
+import org.osgi.framework.BundleContext;
 import org.osgi.framework.FrameworkUtil;
 import org.xml.sax.SAXException;
 
 /**
  * Bridges the traditional web-application deployers: {@link WebAppDeployer} and {@link ContextDeployer}
- * with the OSGi lifecycle where applications are managed as OSGi-bundles.
+ * with the OSGi lifecycle where applications are managed inside OSGi-bundles.
+ * <p>
+ * This class should be called as a consequence of the activation
+ * of a new service that is a ContextHandler.<br/>
+ * This way the new webapps are exposed as OSGi services.
+ * </p>
  * <p>
  * Helper methods to register a bundle that is a web-application or a context.
  * It is deployed as if the server was using its WebAppDeployer or ContextDeployer
@@ -60,7 +67,7 @@ import org.xml.sax.SAXException;
  * </ul>
  * @author hmalphettes
  */
-public class WebappRegistrationHelper {
+class WebappRegistrationHelper {
 	
 	private Server _server;
 	private ContextDeployer _ctxtDeployer;
@@ -75,7 +82,108 @@ public class WebappRegistrationHelper {
 	public WebappRegistrationHelper(Server server) {
 		_server = server;
 	}
+	
+	
+	public void setup(BundleContext context) throws Exception {
+		File _installLocation = FileLocatorHelper.getBundleInstallLocation(context.getBundle());
+		TldConfigurationHelper.fixupDtdResolution();
+		
+		String jettyHome = System.getProperty("jetty.home");
+		if (jettyHome == null || jettyHome.length() == 0) {
+			jettyHome = _installLocation.getAbsolutePath() + "/jettyhome";
+			System.setProperty("jetty.home", jettyHome);
+		}
+		String jettyLogs = System.getProperty("jetty.logs");
+		if (jettyLogs == null || jettyLogs.length() == 0) {
+			System.setProperty("jetty.logs", System.getProperty("jetty.home") + "/logs");
+		}
+		
+		
+		ClassLoader contextCl = Thread.currentThread().getContextClassLoader();
+		try {
+			
+			XmlConfiguration config = new XmlConfiguration(new FileInputStream(
+					System.getProperty("jetty.home") + "/etc/jetty.xml"));
+			
+			//passing this bundle's classloader as the context classlaoder
+			//makes sure there is access to all the jetty's bundles
+			
+			File jettyHomeF = new File(jettyHome);
+			try {
+				_libEtcClassLoader = LibEtcClassLoaderHelper
+					.createLibEtcClassLoaderHelper(jettyHomeF, _server,
+						JettyBootstrapActivator.class.getClassLoader());
+			} catch (MalformedURLException e) {
+				e.printStackTrace();
+			}
+			
+			Thread.currentThread().setContextClassLoader(_libEtcClassLoader);
+			config.configure(_server);
+			
+			init();
+			
+			_server.start();
+//					_server.join();
+		} catch (Throwable t) {
+			t.printStackTrace();
+		} finally {
+			Thread.currentThread().setContextClassLoader(contextCl);
+		}
 
+	}
+
+	
+	/**
+	 * Must be called after the server is configured.
+	 * 
+	 * Locate the actual instance of the ContextDeployer and WebAppDeployer
+	 *  that was created when configuring the server through jetty.xml.
+	 * If there is no such thing it won't be possible to deploy webapps from a context
+	 * and we throw IllegalStateExceptions.
+	 */
+	private void init() {
+		
+        //[Hugues] if no jndi is setup let's do it.
+		//we could also get the bundle for jetty-jndi and open the corresponding properties file
+		//instead of hardcoding the values: but they are unlikely to change.
+		if (System.getProperty("java.naming.factory.initial") == null) {
+			System.setProperty("java.naming.factory.initial", "org.eclipse.jetty.jndi.InitialContextFactory");
+		}
+		if (System.getProperty("java.naming.factory.url.pkgs") == null) {
+			System.setProperty("java.naming.factory.url.pkgs", "org.eclipse.jetty.jndi");
+		}
+
+		
+		_ctxtHandler = (ContextHandlerCollection)_server
+			.getChildHandlerByClass(ContextHandlerCollection.class);
+		if (_ctxtHandler == null) {
+			throw new IllegalStateException(
+					"ERROR: No ContextHandlerCollection was configured" +
+					" with the server to add applications to." +
+					"Using a default one is not supported at" +
+					" this point. " + " Please review the jetty.xml file used.");
+		}
+		List<ContextDeployer> ctxtDeployers = _server.getBeans(ContextDeployer.class);
+		
+		if (ctxtDeployers == null || ctxtDeployers.isEmpty()) {
+			System.err.println("Warn: No ContextDeployer was configured" +
+					" with the server. Using a default one is not supported at" +
+					" this point. " + " Please review the jetty.xml file used.");
+		} else {
+			_ctxtDeployer = ctxtDeployers.get(0);
+		}
+		List<WebAppDeployer> wDeployers = _server.getBeans(WebAppDeployer.class);
+		
+		if (wDeployers == null || wDeployers.isEmpty()) {
+			System.err.println("Warn: No WebappDeployer was configured" +
+					" with the server. Using a default one is not supported at" +
+					" this point. " + " Please review the jetty.xml file used.");
+		} else {
+			_webappDeployer = (WebAppDeployer)wDeployers.get(0);
+		}
+		
+	}
+	
 	/**
 	 * Deploy a new web application on the jetty server.
 	 * 
@@ -160,7 +268,44 @@ public class WebappRegistrationHelper {
 	 * @param classInBundle
 	 * @throws Exception
 	 */
-	public synchronized void registerContext(Bundle contributor, File contextFile,
+	public void registerContext(Bundle contributor, String contextFileRelativePath,
+			Class<?> classInBundle) throws Exception {
+		String jettyContextsHome = System.getProperty("jetty.contexts.home");
+		if (jettyContextsHome != null) {
+			File contextsHome = new File(jettyContextsHome);
+			if (!contextsHome.exists() || !contextsHome.isDirectory()) {
+				throw new IllegalArgumentException("the ${jetty.home.contexts} '"
+						+ jettyContextsHome + " must exist and be a folder"); 
+			}
+			File prodContextFile = new File(contextsHome,
+					contributor.getSymbolicName() + "/" + contextFileRelativePath);
+			if (prodContextFile.exists()) {
+				registerContext(contributor, prodContextFile, classInBundle);
+				return;
+			}
+		}
+		File contextFile = new File(FileLocatorHelper
+				.getBundleInstallLocation(contributor), contextFileRelativePath);
+		if (contextFile.exists()) {
+			registerContext(contributor, contextFile, classInBundle);
+			return;
+		} else {
+			throw new IllegalArgumentException("Could not find the context " +
+					"file " + contextFileRelativePath + " for the bundle " +
+					contributor.getSymbolicName());
+		}
+	}
+	/**
+	 * This type of registration relies on jetty's complete context xml file.
+	 * Context encompasses jndi and all other things.
+	 * This makes the definition of the webapp a lot more self-contained.
+	 * 
+	 * @param webapp
+	 * @param contextPath
+	 * @param classInBundle
+	 * @throws Exception
+	 */
+	private void registerContext(Bundle contributor, File contextFile,
 			Class<?> classInBundle) throws Exception {
 		ClassLoader contextCl = Thread.currentThread().getContextClassLoader();
 		try {
@@ -235,66 +380,7 @@ public class WebappRegistrationHelper {
 			return new URL[] {jasperLocation.toURI().toURL()};
 		}
 	}
-	
-	/**
-	 * Must be called after the server is configured.
-	 * 
-	 * Locate the actual instance of the ContextDeployer and WebAppDeployer
-	 *  that was created when configuring the server through jetty.xml.
-	 * If there is no such thing it won't be possible to deploy webapps from a context
-	 * and we throw IllegalStateExceptions.
-	 */
-	public void init() {
-		
-        //[Hugues] if no jndi is setup let's do it.
-		//we could also get the bundle for jetty-jndi and open the corresponding properties file
-		//instead of hardcoding the values: but they are unlikely to change.
-		if (System.getProperty("java.naming.factory.initial") == null) {
-			System.setProperty("java.naming.factory.initial", "org.eclipse.jetty.jndi.InitialContextFactory");
-		}
-		if (System.getProperty("java.naming.factory.url.pkgs") == null) {
-			System.setProperty("java.naming.factory.url.pkgs", "org.eclipse.jetty.jndi");
-		}
 
-		
-		_ctxtHandler = (ContextHandlerCollection)_server
-			.getChildHandlerByClass(ContextHandlerCollection.class);
-		if (_ctxtHandler == null) {
-			throw new IllegalStateException(
-					"ERROR: No ContextHandlerCollection was configured" +
-					" with the server to add applications to." +
-					"Using a default one is not supported at" +
-					" this point. " + " Please review the jetty.xml file used.");
-		}
-		List<ContextDeployer> ctxtDeployers = _server.getBeans(ContextDeployer.class);
-		
-		if (ctxtDeployers == null || ctxtDeployers.isEmpty()) {
-			System.err.println("Warn: No ContextDeployer was configured" +
-					" with the server. Using a default one is not supported at" +
-					" this point. " + " Please review the jetty.xml file used.");
-		} else {
-			_ctxtDeployer = ctxtDeployers.get(0);
-		}
-		List<WebAppDeployer> wDeployers = _server.getBeans(WebAppDeployer.class);
-		
-		if (wDeployers == null || wDeployers.isEmpty()) {
-			System.err.println("Warn: No WebappDeployer was configured" +
-					" with the server. Using a default one is not supported at" +
-					" this point. " + " Please review the jetty.xml file used.");
-		} else {
-			_webappDeployer = (WebAppDeployer)wDeployers.get(0);
-		}
-		
-		File jettyHome = new File(System.getProperty("jetty.home"));
-		try {
-			_libEtcClassLoader = LibEtcClassLoaderHelper
-				.createLibEtcClassLoaderHelper(jettyHome, _server,
-					JettyBootstrapActivator.class.getClassLoader());
-		} catch (MalformedURLException e) {
-			e.printStackTrace();
-		}
-		
-	}
 
 	/**
 	 * Applies the properties of WebAppDeployer as defined in jetty.xml.
@@ -508,7 +594,7 @@ public class WebappRegistrationHelper {
 					WebAppDeployer.class.getDeclaredField("_contextAttributes");
 				WEBAPP_DEPLOYER_CONTEXT_ATTRIBUTES_FIELD.setAccessible(true);
 			}
-			return (AttributesMap) WEBAPP_DEPLOYER_CONTEXT_ATTRIBUTES_FIELD.get(_ctxtDeployer);
+			return (AttributesMap) WEBAPP_DEPLOYER_CONTEXT_ATTRIBUTES_FIELD.get(_webappDeployer);
 		} catch (Throwable t) {
 			t.printStackTrace();
 		}

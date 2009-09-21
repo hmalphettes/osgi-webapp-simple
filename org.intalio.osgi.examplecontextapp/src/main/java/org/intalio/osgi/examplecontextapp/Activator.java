@@ -13,8 +13,9 @@ public class Activator implements BundleActivator {
 	public void start(BundleContext context) throws Exception {
 		 System.err.println("starting a context bundle");
 		 try {
-			 JettyBootstrapActivator.getInstance().registerContext(
-					 context.getBundle(), "contexts/examplecontext.xml", MyServlet.class);
+			 JettyBootstrapActivator.registerContext(
+					 context.getBundle(), "contexts/examplecontext.xml",
+					 MyServlet.class.getName());
 		 } catch (Throwable t) {
 			 t.printStackTrace();
 		 }

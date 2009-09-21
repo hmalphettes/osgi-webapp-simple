@@ -10,15 +10,13 @@
 *******************************************************************************/
 package org.intalio.osgi.jetty.server;
 
-import java.io.File;
-import java.io.FileInputStream;
+import java.util.Properties;
 
 import org.eclipse.jetty.server.Server;
-import org.eclipse.jetty.server.handler.ContextHandlerCollection;
-import org.eclipse.jetty.xml.XmlConfiguration;
-import org.intalio.osgi.jetty.server.internal.jsp.TldConfigurationHelper;
-import org.intalio.osgi.jetty.server.internal.webapp.WebappRegistrationHelper;
-import org.intalio.osgi.jetty.server.utils.FileLocatorHelper;
+import org.eclipse.jetty.server.handler.ContextHandler;
+import org.eclipse.jetty.webapp.WebAppContext;
+import org.intalio.osgi.jetty.server.internal.webapp.JettyContextHandlerExtender;
+import org.intalio.osgi.jetty.server.internal.webapp.JettyContextHandlerServiceTracker;
 import org.osgi.framework.Bundle;
 import org.osgi.framework.BundleActivator;
 import org.osgi.framework.BundleContext;
@@ -41,7 +39,8 @@ import org.osgi.framework.BundleContext;
  * made all imports to ant, xalan and sun packages optional.</li>
  *   </ul>
  * </li>
- * <li> jsp with tag-libs [untested]</li>
+ * <li> jsp with tag-libs [ok]</li>
+ * <li> test-jndi with atomikos and derby inside ${jetty.home}/lib/etc [ok]</li>
  * </ul>
  * @author hmalphettes
  * @author Intalio Inc
@@ -54,61 +53,41 @@ public class JettyBootstrapActivator implements BundleActivator {
 		return INSTANCE;
 	}
 	
-	private File _installLocation;
 	private Server _server;
-	private WebappRegistrationHelper _webappRegistrationHelper;
-
-	/*
-	 * (non-Javadoc)
-	 * @see org.osgi.framework.BundleActivator#start(org.osgi.framework.BundleContext)
+	
+	/**
+	 * Setup a new jetty Server, registers it as a service.
+	 * Setup the Service tracker for the jetty ContextHandlers that are in
+	 * charge of deploying the webapps.
+	 * Setup the BundleListener that supports the extender pattern for the
+	 * jetty ContextHandler.
+	 * 
+	 * @param context
 	 */
 	public void start(BundleContext context) throws Exception {
 		System.err.println("Activating" + this.getClass().getName());
-		TldConfigurationHelper.fixupDtdResolution();
-		
 		INSTANCE = this;
-		_installLocation = FileLocatorHelper.getBundleInstallLocation(context.getBundle());
+		_server = new Server();
+		//expose the server as a service. 
+		context.registerService(_server.getClass().getName(), _server, new Properties());
+		//the tracker in charge of the actual deployment
+		//and that will configure and start the jetty server.
+		JettyContextHandlerServiceTracker jettyContextHandlerTracker =
+			new JettyContextHandlerServiceTracker(context, _server);
 		
-		String jettyHome = System.getProperty("jetty.home");
-		if (jettyHome == null || jettyHome.length() == 0) {
-			System.setProperty("jetty.home", _installLocation.getAbsolutePath() + "/jettyhome");
-		}
-		String jettyLogs = System.getProperty("jetty.logs");
-		if (jettyLogs == null || jettyLogs.length() == 0) {
-			System.setProperty("jetty.logs", System.getProperty("jetty.home") + "/logs");
-		}
+		//TODO: add a couple more checks on the properties?
+		//kind of nice not to so we can debug what is missing easily.
+		context.addServiceListener(jettyContextHandlerTracker,
+				"(objectclass=" + ContextHandler.class.getName() + ")");
 		
+		//now ready to support the Extender pattern:
+		JettyContextHandlerExtender jettyContexHandlerExtender = 
+			new JettyContextHandlerExtender();
+		context.addBundleListener(jettyContexHandlerExtender);
 		
-		ClassLoader contextCl = Thread.currentThread().getContextClassLoader();
-		try {
-			_server = new Server();
-			_webappRegistrationHelper = new WebappRegistrationHelper(_server);
-			XmlConfiguration config = new XmlConfiguration(new FileInputStream(
-					System.getProperty("jetty.home") + "/etc/jetty.xml"));
-			
-			//passing this bundle's classloader as the context classlaoder
-			//makes sure there is access to all the jetty's bundles
-			Thread.currentThread().setContextClassLoader(JettyBootstrapActivator.class.getClassLoader());
-			config.configure(_server);
-			
-			_webappRegistrationHelper.init();
-			
-			//check that there is a handler able to support webapps with this config:
-			ContextHandlerCollection ctxtHandler = (ContextHandlerCollection)_server
-					.getChildHandlerByClass(ContextHandlerCollection.class);
-			if (ctxtHandler == null) {
-				System.err.println("Warning: could not find a ContextHandlerCollection:" +
-						" it won't be possible to register web-applications.");
-			}
-			
-			_server.start();
-//					_server.join();
-		} catch (Throwable t) {
-			t.printStackTrace();
-		} finally {
-			Thread.currentThread().setContextClassLoader(contextCl);
-		}
+		jettyContexHandlerExtender.init(context);
 		
+
 	}
 
 	/*
@@ -116,14 +95,16 @@ public class JettyBootstrapActivator implements BundleActivator {
 	 * @see org.osgi.framework.BundleActivator#stop(org.osgi.framework.BundleContext)
 	 */
 	public void stop(BundleContext context) throws Exception {
-		_server.stop();
 		INSTANCE = null;
+		_server.stop();
 	}
 	
 	
 
 	/**
-	 * Deploy a new web application on the jetty server.
+	 * Helper method that creates a new org.jetty.webapp.WebAppContext
+	 * and registers it as an OSGi service.
+	 * The tracker {@link JettyContextHandlerServiceTracker} will do the actual deployment.
 	 * 
 	 * @param context The current bundle context
 	 * @param webappFolderPath The path to the root of the webapp.
@@ -134,50 +115,42 @@ public class JettyBootstrapActivator implements BundleActivator {
 	 * OSGI classloader.
 	 * @throws Exception
 	 */
-	public void registerWebapplication(Bundle bundle, String webappFolderPath,
-			String contextPath, Class<?> classInBundle) throws Exception {
-		_webappRegistrationHelper.registerWebapplication(bundle, webappFolderPath, contextPath, classInBundle);
+	public static void registerWebapplication(Bundle contributor, String webappFolderPath,
+			String contextPath, String classInBundle) throws Exception {
+		WebAppContext contextHandler = new WebAppContext();
+		Properties dic = new Properties();
+		dic.put("war", webappFolderPath);
+		dic.put("contextPath", contextPath);
+		dic.put("classInBundle", classInBundle);
+		contributor.getBundleContext().registerService(
+				ContextHandler.class.getName(),
+				contextHandler, dic);
 	}
 
 	/**
-	 * 
-	 * @param webapp
-	 * @param contextPath
-	 * @param classInBundle
-	 * @throws Exception
-	 */
-	public void registerWebapplication(Bundle contributor, File webapp,
-			String contextPath, Class<?> classInBundle) throws Exception {
-		_webappRegistrationHelper.registerWebapplication(contributor, webapp, contextPath, classInBundle);
-	}
-	
-	/**
+	 * Helper method that creates a new skeleton of a ContextHandler.
+	 * and registers it as an OSGi service.
+	 * The tracker {@link JettyContextHandlerServiceTracker} will do the actual deployment.
 	 * 
 	 * @param contributor The bundle that registers a new context
-	 * @param contextRelativePath The path to the file insie the bundle that defines the context.
-	 * @param classInBundle
+	 * @param contextFilePath The path to the file inside the bundle that defines the context.
+	 * @param classInBundle Name of a class that is in the bundle.
 	 * @throws Exception
 	 */
-	public void registerContext(Bundle contributor, String contextRelativePath,
-			Class<?> classInBundle) throws Exception {
-		File contextFile = FileLocatorHelper.getFileInBundle(contributor, contextRelativePath);
-		this.registerContext(contributor, contextFile, classInBundle);
-	}
-	/**
-	 * 
-	 * @param contributor
-	 * @param contextFile The context file.
-	 * @param classInBundle
-	 * @throws Exception
-	 */
-	public void registerContext(Bundle contributor, File contextFile,
-			Class<?> classInBundle) throws Exception {
-		_webappRegistrationHelper.registerContext(contributor, contextFile, classInBundle);
+	public static void registerContext(Bundle contributor, String contextFilePath,
+			String classInBundle) throws Exception {
+		ContextHandler contextHandler = new ContextHandler();
+		Properties dic = new Properties();
+		dic.put("contextFilePath", contextFilePath);
+		dic.put("classInBundle", classInBundle);
+		contributor.getBundleContext().registerService(
+				ContextHandler.class.getName(),
+				contextHandler, dic);
 	}
 	
 	
-	public void unregister(String contextPath) {
-		_webappRegistrationHelper.unregister(contextPath);
+	public static void unregister(String contextPath) {
+		//todo
 	}
 	
 	

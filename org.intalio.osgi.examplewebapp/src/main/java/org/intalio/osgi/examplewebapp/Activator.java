@@ -13,10 +13,10 @@ public class Activator implements BundleActivator {
 	public void start(BundleContext context) throws Exception {
 		 System.err.println("starting a webapp bundle");
 		 try {
-			 JettyBootstrapActivator.getInstance().registerWebapplication(
-					 context.getBundle(), "web", "/example", MyServlet.class);
+			 JettyBootstrapActivator.registerWebapplication(
+					 context.getBundle(), "web", "/example", MyServlet.class.getName());
 		 } catch (Throwable t) {
-		 t.printStackTrace();
+			 t.printStackTrace();
 		 }
 	}
 
